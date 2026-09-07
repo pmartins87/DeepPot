@@ -2,65 +2,91 @@
 
 Reference date: 2026-09-07
 
-## State
+## Current state
 
-**P0 — Rules and economy gate: IN PROGRESS**  
-**P1 — NLH game kernel: STARTED**
+**Base-first plan adopted.** The project will reproduce the DeepKK philosophy in two stages:
 
-Repository initialized from an empty `main` branch.
+`mathematical base strategy -> operational base runtime -> only then opponent exploitation`
 
-### Confirmed from KKPoker official Pot Fold rules (2026-09-03)
+The exploit/tracker work is intentionally deferred until the base solver and runtime are validated.
 
-- Pot Fold follows traditional NLH/PLO hand-ranking rules but changes the betting options.
-- NLH deals two hole cards to each player.
-- Every player pays an ante; SB/BB positions do not post blinds in addition to that ante.
-- Preflop betting is skipped; the flop is dealt immediately.
-- Flop action begins with the player in the Small Blind position and proceeds around the table.
-- The fixed continue action is the initial-pot amount; players can otherwise fold.
-- Once flop action is complete and at least two players remain, turn and river are dealt automatically and the best hand wins at showdown.
-- KKPoker advertises Pot Fold for NLH and PLO; FLASH excluded.
-- Straddle, Post Big Blind, Ante Up, Bomb Pot and EV Chop are unavailable on Pot Fold tables.
-- Pot Fold does not count toward VPIP.
+## Live mechanics now confirmed
 
-### Rake status
+- Pot Fold tables support up to **8 seats**.
+- Dynamic player counts matter because tables are frequently not full.
+- All dealt players pay equal ante; there are no practical SB/BB forced-blind payments.
+- The **BTN is last to act** on the flop decision street.
+- If every player before the last survivor folds, the survivor wins immediately without paying the fixed STAY contribution.
+- Uncontested pots are still raked.
 
-**Not frozen.** The KKPoker general rake page currently lists NLH/PLO/AoF/etc. but does not yet expose a Pot Fold-specific rake table.
+A true-HU observation with ante 12 each produced a BTN net profit of +11.52 after the other player folded. Interpreted as stack profit after the BTN's own ante, this exactly matches a 2% deduction from the 24 gross pot: 24 - 0.48 - 12 = 11.52.
 
-Relevant existing official structures:
+Two other reported gross-to-award observations do not fit a single uncapped 2% rule:
 
-- standard NLH: commonly 5% with caps by stake;
-- standard PLO: commonly 5% with caps by stake;
-- AoF: 2%;
-- general cash-game rule: no rake for pots <=5 BB; half designated rake when the table has <=3 players;
-- Instant Rakeback: 5% to 50%, with dynamic PVI affecting player-attributed rake.
+- 84 -> 81.12: deduction 2.88 = 3.428571%
+- 45 -> 43.38: deduction 1.62 = 3.600000%
 
-These values are **context only**, not yet asserted as the Pot Fold economy.
+Therefore the economy remains parameterized and the official rake schedule is **not frozen**.
 
-## Technical decision already made
+## Engineering progress
 
-DeepPot will reuse DeepKK's layered architecture:
+### P1 game kernel — core complete
 
-`base solver -> immutable base policy -> tracker/opponent model -> exploit policies -> DLL/OpenPPL runtime -> safe fallback`
+Implemented:
 
-But the solver state cannot reuse DeepKK's 169 preflop classes. DeepPot requires a flop-conditioned state representation.
+- 2–8 player Pot Fold state machine;
+- neutral action order A0/A1/.../BTN, BTN last;
+- fixed STAY cost = initial ante pot;
+- automatic uncontested termination;
+- zero-STAY BTN win when all previous players fold;
+- showdown terminal state;
+- nominal rake/cap model;
+- per-player contributions, payouts, tie splitting and terminal utilities.
 
-## Implemented in P1 so far
+### P2 canonicalization/equity — prototype complete
 
-- parameterized Pot Fold pot/rake economics probe;
-- fixed continue cost equal to the initial pot;
-- binary `STAY/FOLD` action-tree kernel for arbitrary player count;
-- automatic showdown after all remaining players complete their flop decision;
-- provisional last-player/no-op uncontested terminal (explicitly blocked for live confirmation before strategy publication);
-- regression tests reproducing KKPoker's official 3-handed 3c-ante example (9c initial pot -> 27c with two continuers);
-- initial GitHub Actions CI workflow.
+Implemented:
 
-## Immediate blockers to close P0
+- NLH card/deck model;
+- flop canonicalization under all 24 suit permutations;
+- flop+hole canonicalization under suit isomorphism;
+- regression proving **1,755** canonical NLH flop classes;
+- exact 5-card and 7-card evaluator;
+- exact HU flop equity over all 990 turn-river runouts for two known hands;
+- multiway showdown evaluation for known hole cards and final board.
 
-1. Pot Fold lobby/table screenshot showing stake/ante, number of seats and rake/cap information if displayed.
-2. One or more hand examples where early positions all fold, to confirm last-player terminal behavior.
-3. Confirmation whether the general `<=3 players => half rake` rule is actually applied to Pot Fold.
-4. Confirmation of Pot Fold rakeback/EXP behavior in the live client.
+### P3 base solver — first prototype implemented
 
-## Next implementation target
+Implemented a fixed-flop **chance-sampled CFR** engine:
 
-Proceed with P2 canonical flop/equity prototype while P0 evidence is collected. Publication of an official strategy remains blocked until P0's economy is confirmed.
+- samples private cards plus turn/river once per iteration;
+- traverses the complete binary FOLD/STAY tree for that sampled deal;
+- uses information sets containing only public flop/history + actor's own hole cards;
+- supports 2 through 8 players;
+- supports CFR+ regret clipping and linear averaging;
+- has deterministic seed behavior and smoke tests.
+
+This is deliberately marked **prototype**, not final solver. Path-dependent rake makes utilities non-constant-sum, and N>2 is multiplayer. Those facts require explicit validation before we treat CFR convergence as a production equilibrium guarantee.
+
+## Validation already performed locally before publication
+
+The new card/canonicalization/evaluator/economy/solver test suite was executed together with the existing kernel tests: **20 tests passed** in the local validation mirror before the GitHub files were published.
+
+GitHub Actions remains the repository CI gate for the committed tree.
+
+## Next critical work
+
+1. Add production run configuration/manifest analogous to DeepKK.
+2. Build cross-seed/stability metrics for a small HU canonical-flop pilot.
+3. Implement a HU best-response/exploitability validator independent of the training update rule.
+4. Add multiprocessing/checkpointing by canonical flop.
+5. Benchmark exact-state storage and determine whether abstraction is needed.
+6. Only after the base solver passes P4, scale from HU pilots to all 1,755 flops and then N=3..8.
+
+## Information still useful later, but not blocking development
+
+For future observed hands, the most valuable record is:
+
+`players dealt | ante | FOLD/STAY sequence | gross terminal pot | amount awarded | any separate fee/rake line | total award vs net stack change | rakeback/EXP credit`
+
+No screenshots are required right now to continue base-solver development.
