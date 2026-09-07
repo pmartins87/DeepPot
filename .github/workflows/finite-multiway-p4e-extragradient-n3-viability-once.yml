@@ -1,0 +1,104 @@
+name: Finite Multiway P4E Extragradient N3 Viability Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finite-multiway-p4e-extragradient-n3-viability-once.yml'
+
+jobs:
+  p4e-n3:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - id: n3_rainbow
+            flop: 'Ah 7d 2c'
+          - id: n3_monotone
+            flop: 'Ah 7h 2h'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build frozen exact CFR warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --players 3 \
+            --flop '${{ matrix.flop }}' \
+            --iterations 250000 \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/${{ matrix.id }}
+      - name: Run frozen projected Nash extragradient
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_extragradient \
+            --players 3 \
+            --policy runs/${{ matrix.id }}/policy_consensus.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 64 \
+            --predictor-samples-per-round 50000 \
+            --corrector-samples-per-round 50000 \
+            --initial-max-coordinate-radius 0.10 \
+            --seed-base 9602026 \
+            --out-policy runs/${{ matrix.id }}/policy_extragradient.csv \
+            --out-audit runs/${{ matrix.id }}/p4e_extragradient_audit.json
+      - name: Run original independent response gate
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_response \
+            --players 3 \
+            --policy runs/${{ matrix.id }}/policy_extragradient.csv \
+            --flop '${{ matrix.flop }}' \
+            --learn-samples 250000 \
+            --eval-samples 250000 \
+            --seed 9302026 \
+            --rake-pct 0.02 \
+            --out runs/${{ matrix.id }}/p4e_response.json
+      - name: Apply frozen P4E viability threshold
+        env:
+          CASE_ID: ${{ matrix.id }}
+          FLOP: ${{ matrix.flop }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('runs') / os.environ['CASE_ID']
+          summary = json.loads((root / 'summary.json').read_text())
+          response = json.loads((root / 'p4e_response.json').read_text())
+          coverage = summary['consensus']['shared_all_coverage']
+          seat_uppers = [x['ci95_high'] for x in response['unilateral_gain']]
+          result = {
+              'phase': 'P4E_N3_PROJECTED_EXTRAGRADIENT_VIABILITY',
+              'case': os.environ['CASE_ID'],
+              'players': 3,
+              'flop': os.environ['FLOP'],
+              'coverage': coverage,
+              'seat_unilateral_gain_ci95_high': seat_uppers,
+              'threshold': 0.03,
+              'method': 'CFR_250k_x3_then_projected_extragradient_64x_PRED50k_CORR50k',
+              'radius_schedule': '0.10/sqrt(round)',
+          }
+          result['pass'] = coverage == 1.0 and all(x <= 0.03 for x in seat_uppers)
+          (root / 'p4e_gate.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          if not result['pass']:
+              raise SystemExit(1)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p4e-extragradient-${{ matrix.id }}
+          path: runs/${{ matrix.id }}/
