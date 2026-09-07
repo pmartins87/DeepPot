@@ -137,7 +137,7 @@ The one fixed N=2..8 benchmark and the **single allowed implementation-optimizat
 
 # P4 — Finite solver-quality calibration
 
-Status: **IN PROGRESS — HU PASS / MULTIWAY NEXT**
+Status: **IN PROGRESS — HU PASS / P4C BLOCKED / P4D RUNNING**
 
 ## P4A — HU A72r ladder: CLOSED
 
@@ -180,46 +180,67 @@ All four frozen representative HU textures PASS after that one correction:
 | `Ah 7h 2h` | monotone | 0.984012 | 0.007234 | 0.004585 | 0.011112 |
 | `Ah Ad 2c` | paired | 0.944220 | 0.008125 | 0.012350 | 0.019316 |
 
-The monotone raw result exceeded the frozen total threshold by only ~0.000009 ante; **the threshold was not relaxed**. It received the same one permitted correction as the other failing raw cases.
+**HU calibration is closed.** The provisional-economy HU production method is `2M x 3 CFR consensus -> fixed 12 x 100k damped-response refinement`.
 
-**HU calibration is now closed.** The production HU method is `2M x 3 CFR consensus -> fixed 12 x 100k damped-response refinement` for the provisional economy profile, subject only to P0 economy freezing before P5.
+## P4C — Original multiway CFR/FP path: BLOCKED
 
-## P4C — Multiway representative gate
+The frozen representative gate was executed on all 12 N/texture cases:
 
-Status: **READY TO RUN**
+- N=3..8;
+- `Ah 7d 2c` rainbow;
+- `Ah 7h 2h` monotone.
 
-Validate N=3..8 on exactly two representative textures each:
+Every raw CFR candidate had 100% intended exact-state coverage, but **all 12 failed** the unchanged per-seat unilateral-gain threshold of 0.03 ante.
 
-- `Ah 7d 2c` — max-state rainbow;
-- `Ah 7h 2h` — low-state monotone.
+The one permitted correction was then applied to the already-failed N=3..6 cases: 32 rounds of finite multiplayer fictitious-response averaging, with 50k samples/round for N=3/4 and 25k for N=5/6, followed by exactly one rerun of the original response gate.
 
-The exact public-tree split-sample unilateral-response validator for N=3..8 is implemented and regression-tested. It integrates the complete FOLD/STAY public tree for each sampled chance deal and preserves exact flop-relative hole states.
+All eight corrected N=3..6 cases still failed. Corrected worst-seat 95% upper bounds:
 
-### Frozen candidate budgets
-
-These are the only initial multiway candidate budgets:
-
-| N | solver budget per representative flop | response learn | response holdout |
+| N | rainbow | monotone | threshold |
 |---:|---:|---:|---:|
-| 3 | 250k x 3 seeds | 250k | 250k |
-| 4 | 250k x 3 seeds | 250k | 250k |
-| 5 | 100k x 3 seeds | 100k | 100k |
-| 6 | 100k x 3 seeds | 100k | 100k |
-| 7 | 100k x 3 seeds | 100k | 100k |
-| 8 | 100k x 3 seeds | 100k | 100k |
+| 3 | 0.070115 | 0.031408 | <= 0.030000 |
+| 4 | 0.131516 | 0.061585 | <= 0.030000 |
+| 5 | 0.238271 | 0.149504 | <= 0.030000 |
+| 6 | 0.310460 | 0.204696 | <= 0.030000 |
 
-For every one of the 12 fixed N/texture cases:
+Because the single correction failed, **P4C is BLOCKED**. We do not add CFR iterations, extra FP rounds, new alpha schedules or relaxed thresholds. We also do not spend compute applying the disproven P4C correction to N=7/8.
 
-- [ ] train the frozen candidate budget;
-- [ ] require 100% exact policy coverage;
-- [ ] run the fixed split-sample unilateral-response audit for every seat;
-- [ ] record profile EV and unilateral-response gain with 95% CI.
+The exact multiway response validator has additionally passed a differential N=2 comparison against the independent HU validator, supporting the validity of the measured multiway response gaps.
 
-PASS threshold: **every seat's unilateral-gain 95% upper bound must be <= 0.03 ante** on both representative textures.
+## P4D — FP-PED method reset
 
-If one or more cases fail, P4C receives **one multiway solver-method correction targeted at response quality and one rerun of only the failing cases**. If any corrected case still fails, P4 is BLOCKED and the method changes; no iteration ladder or threshold relaxation is allowed.
+Status: **N=3 FINITE VIABILITY GATE RUNNING**
 
-P4 ends with one frozen production method/configuration for each player-count mode N=2..8.
+The replacement method is exact-state FP-PED:
+
+`exact CFR consensus -> frozen FP warm start -> sampled Projected Exploitability Descent -> original independent response gate`
+
+The PED implementation minimizes the aggregate unilateral-deviation objective. Because each Pot-Fold player acts at most once, sequence-form feasibility reduces to one independent FOLD/STAY simplex per exact infoset, so projection is exact local projection of `P(STAY)` to `[0,1]`.
+
+Implementation and differential gradient tests are complete. The finite protocol is frozen in `docs/P4D_FP_PED_METHOD_RESET.md` before seeing P4D gate results.
+
+### Frozen N=3 viability cases
+
+Run exactly:
+
+- N=3 `Ah 7d 2c`;
+- N=3 `Ah 7h 2h`.
+
+For both:
+
+- CFR warm start: 250k x 3 seeds;
+- FP warm start: 32 x 50k, prior weight 4;
+- PED: 32 rounds;
+- each PED round: 50k BR-learning + 50k independent gradient samples;
+- projected normalized max-coordinate step: `0.10 / sqrt(round)`;
+- final response gate: 250k learn + 250k holdout;
+- PASS: coverage 100% and every seat 95% unilateral-gain upper <= 0.03 ante.
+
+No early stopping, tuning, checkpoint selection or threshold relaxation is allowed after seeing the result.
+
+If both N=3 cases PASS, promote the same method to N=4..8 with the pre-frozen sample scaling in `docs/P4D_FP_PED_METHOD_RESET.md`. If either N=3 case fails, P4D is BLOCKED and the solver method changes again rather than adding another test ladder.
+
+P4 ends only with one frozen production method/configuration for every player-count mode N=2..8.
 
 ---
 
