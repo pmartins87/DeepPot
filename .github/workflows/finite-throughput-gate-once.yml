@@ -1,0 +1,28 @@
+name: Finite N2-N8 Throughput Gate Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finite-throughput-gate-once.yml'
+
+jobs:
+  throughput:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run fixed finite throughput gate
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.throughput_gate \
+            --seed 1 \
+            --rake-pct 0.02 \
+            --out throughput_gate.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: finite-throughput-gate
+          path: throughput_gate.json
