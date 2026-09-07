@@ -14,13 +14,25 @@ from .cards import Card
 from .solver import ChanceSampledCFR, SolveResult
 from .validation import audit_to_dict, build_consensus
 
-PILOT_VERSION = "2026-09-07.1"
+PILOT_VERSION = "2026-09-07.2"
 
 
 def _source_hash() -> str:
     h = hashlib.sha256()
     root = Path(__file__).resolve().parent
-    for name in ("cards.py", "economics.py", "evaluator.py", "game.py", "scenarios.py", "solver.py", "validation.py", "pilot.py"):
+    for name in (
+        "cards.py",
+        "economics.py",
+        "equity.py",
+        "evaluator.py",
+        "exact_index.py",
+        "game.py",
+        "scenarios.py",
+        "solver.py",
+        "state_space.py",
+        "validation.py",
+        "pilot.py",
+    ):
         h.update(name.encode())
         h.update((root / name).read_bytes())
     return h.hexdigest()
@@ -50,15 +62,30 @@ def _solve_one(args: tuple[int, tuple[Card, Card, Card], int, float, float | Non
 def _write_policy(path: Path, result: SolveResult) -> None:
     with path.open("w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["infoset", "p_fold", "p_stay", "visits"])
+        w.writerow([
+            "infoset_key",
+            "public_scenario_id",
+            "exact_hole_state_id",
+            "p_fold",
+            "p_stay",
+            "visits",
+        ])
         for key in sorted(result.nodes):
             node = result.nodes[key]
+            public_id, hole_id = result.decode_infoset_key(key)
             p_fold, p_stay = node.average_strategy()
-            w.writerow([key, f"{p_fold:.12g}", f"{p_stay:.12g}", node.visits])
+            w.writerow([
+                key,
+                public_id,
+                hole_id,
+                f"{p_fold:.12g}",
+                f"{p_stay:.12g}",
+                node.visits,
+            ])
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="DeepPot HU fixed-flop cross-seed pilot")
+    ap = argparse.ArgumentParser(description="DeepPot HU fixed-flop exact-state cross-seed pilot")
     ap.add_argument("--flop", default="Ah 7d 2c")
     ap.add_argument("--iterations", type=int, default=10000)
     ap.add_argument("--seeds", default="1,2,3")
@@ -88,16 +115,20 @@ def main() -> None:
         "rake_pct": args.rake_pct,
         "rake_cap": args.rake_cap,
         "workers": args.workers,
-        "solver": "chance_sampled_cfr_plus_linear_average",
+        "solver": "exact_state_chance_sampled_cfr_plus_linear_average",
+        "strategic_card_abstraction": "none",
+        "exact_symmetry_reduction": "global_suit_isomorphism_only",
     }
     (out / "RUN_MANIFEST.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     jobs = [(s, flop, args.iterations, args.rake_pct, args.rake_cap) for s in seeds]
+    started = time.perf_counter()
     if args.workers > 1:
         with ProcessPoolExecutor(max_workers=args.workers) as ex:
             results = list(ex.map(_solve_one, jobs))
     else:
         results = [_solve_one(j) for j in jobs]
+    elapsed = time.perf_counter() - started
 
     seed_policies = {}
     visit_summary = {}
@@ -107,20 +138,28 @@ def main() -> None:
         visits = sorted(node.visits for node in result.nodes.values())
         visit_summary[str(result.seed)] = {
             "infosets": len(visits),
+            "exact_hole_states_on_flop": result.hole_state_count,
             "min_visits": visits[0] if visits else 0,
             "median_visits": visits[len(visits)//2] if visits else 0,
             "max_visits": visits[-1] if visits else 0,
         }
 
     pairwise, consensus = build_consensus(seed_policies)
+    total_iterations = args.iterations * len(seeds)
     summary = {
         "pairwise": [audit_to_dict(x) for x in pairwise],
         "consensus": audit_to_dict(consensus),
         "visits": visit_summary,
+        "performance": {
+            "wall_seconds": elapsed,
+            "total_seed_iterations": total_iterations,
+            "seed_iterations_per_second": total_iterations / elapsed if elapsed > 0 else 0.0,
+        },
     }
     (out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     manifest["stage"] = "completed"
     manifest["completed_at_unix"] = time.time()
+    manifest["wall_seconds"] = elapsed
     manifest["outputs"] = ["summary.json", *[f"policy_seed_{s}.csv" for s in seeds]]
     (out / "RUN_MANIFEST.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
