@@ -1,0 +1,42 @@
+name: Exact HU Deep Stability Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/exact-hu-deep-stability-once.yml'
+
+jobs:
+  stability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Exact A72r 1M x 3 seeds
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --flop 'Ah 7d 2c' \
+            --iterations 1000000 \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/exact_a72r_1m
+      - name: Exact A72r 2M x 3 seeds
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --flop 'Ah 7d 2c' \
+            --iterations 2000000 \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/exact_a72r_2m
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-hu-deep-stability
+          path: runs/
