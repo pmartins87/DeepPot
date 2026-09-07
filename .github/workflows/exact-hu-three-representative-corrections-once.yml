@@ -1,0 +1,115 @@
+name: Exact HU Three Representative Corrections Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/exact-hu-three-representative-corrections-once.yml'
+
+jobs:
+  correction-gate:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: twotone
+            flop: 'Ah 7h 2c'
+          - id: monotone
+            flop: 'Ah 7h 2h'
+          - id: paired
+            flop: 'Ah Ad 2c'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Rebuild exact 2M x 3 consensus
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --flop '${{ matrix.flop }}' \
+            --iterations 2000000 \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/${{ matrix.id }}
+      - name: Apply the single frozen response-directed correction
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.hu_refine \
+            --policy runs/${{ matrix.id }}/policy_consensus.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 12 \
+            --samples-per-round 100000 \
+            --prior-weight 4 \
+            --seed-base 9202026 \
+            --out-policy runs/${{ matrix.id }}/policy_refined.csv \
+            --out-audit runs/${{ matrix.id }}/refinement_audit.json
+      - name: Rerun the same fixed response gate once
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.hu_response \
+            --policy runs/${{ matrix.id }}/policy_refined.csv \
+            --flop '${{ matrix.flop }}' \
+            --learn-samples 250000 \
+            --eval-samples 250000 \
+            --seed 9102026 \
+            --rake-pct 0.02 \
+            --out runs/${{ matrix.id }}/hu_response_after_correction.json
+      - name: Apply frozen HU gate criteria after correction
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          case = os.environ['CASE_ID']
+          root = Path('runs') / case
+          summary = json.loads((root / 'summary.json').read_text())
+          response = json.loads((root / 'hu_response_after_correction.json').read_text())
+
+          coverage = summary['consensus']['shared_all_coverage']
+          min_pairwise_greedy = min(x['greedy_agreement'] for x in summary['pairwise'])
+          p0_upper = response['player0_br_gain']['ci95_high']
+          p1_upper = response['player1_br_gain']['ci95_high']
+          total_upper = response['nashconv_gain']['ci95_high']
+
+          result = {
+              'case': case,
+              'coverage': coverage,
+              'min_pairwise_greedy_agreement': min_pairwise_greedy,
+              'player0_br_gain_ci95_high': p0_upper,
+              'player1_br_gain_ci95_high': p1_upper,
+              'nashconv_gain_ci95_high': total_upper,
+              'thresholds': {
+                  'coverage': 1.0,
+                  'min_pairwise_greedy_agreement': 0.90,
+                  'player0_br_gain_ci95_high': 0.02,
+                  'player1_br_gain_ci95_high': 0.02,
+                  'nashconv_gain_ci95_high': 0.03,
+              },
+          }
+          result['pass'] = (
+              coverage == 1.0
+              and min_pairwise_greedy >= 0.90
+              and p0_upper <= 0.02
+              and p1_upper <= 0.02
+              and total_upper <= 0.03
+          )
+          (root / 'gate_after_correction.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          if not result['pass']:
+              raise SystemExit(1)
+          PY
+        env:
+          CASE_ID: ${{ matrix.id }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exact-hu-${{ matrix.id }}-one-correction
+          path: runs/${{ matrix.id }}/
