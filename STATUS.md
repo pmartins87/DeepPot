@@ -4,7 +4,7 @@ Reference date: 2026-09-07
 
 ## Current state
 
-**Base-first plan adopted.** The project will reproduce the DeepKK philosophy in two stages:
+**Base-first plan adopted.** The project follows the DeepKK philosophy in two stages:
 
 `mathematical base strategy -> operational base runtime -> only then opponent exploitation`
 
@@ -66,22 +66,52 @@ Implemented a fixed-flop **chance-sampled CFR** engine:
 - supports CFR+ regret clipping and linear averaging;
 - has deterministic seed behavior and smoke tests.
 
-This is deliberately marked **prototype**, not final solver. Path-dependent rake makes utilities non-constant-sum, and N>2 is multiplayer. Those facts require explicit validation before we treat CFR convergence as a production equilibrium guarantee.
+A reproducible pilot runner now exports source hash, run manifest, per-seed policies, visit coverage, pairwise policy differences and consensus stability metrics.
 
-## Validation already performed locally before publication
+## First P4 stability pilot — FAILED, usefully
 
-The new card/canonicalization/evaluator/economy/solver test suite was executed together with the existing kernel tests: **20 tests passed** in the local validation mirror before the GitHub files were published.
+Pilot: HU, flop `Ah 7d 2c`, 2% working rake, 10,000 iterations per seed, seeds 1/2/3.
 
-GitHub Actions remains the repository CI gate for the committed tree.
+Coverage was nearly complete: 2,350 of 2,352 infosets were shared across all seeds (99.915%). But each exact infoset had only **8 median visits**.
+
+Cross-seed results:
+
+- mean absolute difference in P(STAY): about 0.214–0.217;
+- P95 absolute difference: about 0.579–0.581;
+- maximum difference: about 0.98;
+- pairwise greedy-action agreement: only about 71–72%;
+- all-seed greedy agreement: 57.62%;
+- stability classification: **UNSTABLE**.
+
+This is not a failure of the project. It is a gate doing its job: exact flop+hole infosets with shallow chance sampling are too sparse for a cheap all-flop run. We will not waste Ryzen time scaling this naive configuration to all 1,755 flops.
+
+## Solver direction after the pilot
+
+The next design step is **validated card abstraction + variance reduction**, not brute-force scaling.
+
+Research reviewed on poker solvers supports suit-isomorphic card abstraction followed by equity/potential-aware bucketing. This is especially attractive in Pot Fold because turn and river contain chance only—there are no later strategic actions—so the future showdown-strength distribution is directly relevant to the only decision street.
+
+DeepPot will evaluate a hierarchy rather than commit blindly to one bucket count:
+
+1. exact suit-isomorphic state as truth/reference on small pilots;
+2. per-flop equity/potential-aware buckets;
+3. multiple bucket resolutions (coarse -> medium -> fine);
+4. boundary refinement for buckets/states near action indifference;
+5. reject any abstraction that materially changes best action or EV on validation samples.
+
+## Validation already performed
+
+- local combined suite before publication: 22 tests passed after adding stability auditing;
+- GitHub CI on the current code path is passing;
+- first 3-seed pilot is documented in `docs/PILOT_HU_A72R_10K_20260907.md`.
 
 ## Next critical work
 
-1. Add production run configuration/manifest analogous to DeepKK.
-2. Build cross-seed/stability metrics for a small HU canonical-flop pilot.
-3. Implement a HU best-response/exploitability validator independent of the training update rule.
-4. Add multiprocessing/checkpointing by canonical flop.
-5. Benchmark exact-state storage and determine whether abstraction is needed.
-6. Only after the base solver passes P4, scale from HU pilots to all 1,755 flops and then N=3..8.
+1. Implement potential-aware/equity-distribution feature extraction for a fixed flop.
+2. Implement deterministic clustering/bucketing without losing suit/blocker relationships silently.
+3. Re-run the A72r HU pilot at several bucket resolutions and compare cross-seed stability.
+4. Add an independent HU best-response/exploitability validator.
+5. Only then choose the production abstraction and scale across the 1,755 canonical flops.
 
 ## Information still useful later, but not blocking development
 
