@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
+from itertools import combinations
 from typing import Dict, Sequence
 
-from .cards import Card, canonical_flop_hole_id, full_deck, require_unique
+from .cards import Card, full_deck, require_unique
 from .economics import PotFoldEconomy
 from .evaluator import showdown_winners
+from .exact_index import ExactFlopHoleIndex
 from .game import Action, PotFoldRules, PotFoldState
-from .scenarios import scenario_id
+from .scenarios import scenario_dense_id
 
 ACTIONS = (Action.FOLD, Action.STAY)
 
@@ -44,24 +46,40 @@ class SampledDeal:
 class SolveResult:
     iterations: int
     seed: int
-    nodes: Dict[str, InfoNode]
+    nodes: Dict[int, InfoNode]
+    hole_state_count: int
+    flop_key: tuple[tuple[int, int], ...]
 
-    def average_policy(self) -> dict[str, tuple[float, float]]:
+    def average_policy(self) -> dict[int, tuple[float, float]]:
         return {key: node.average_strategy() for key, node in self.nodes.items()}
+
+    def decode_infoset_key(self, key: int) -> tuple[int, int]:
+        """Return `(public_scenario_id, exact_hole_state_id)` for a dense key."""
+
+        if key < 0:
+            raise ValueError("infoset key must be non-negative")
+        return divmod(key, self.hole_state_count)
 
 
 class ChanceSampledCFR:
-    """Prototype base solver for a fixed-flop Pot Fold subgame.
+    """Prototype exact-state base solver for a fixed-flop Pot Fold subgame.
 
     Chance is sampled once per iteration: private hands plus turn/river. The full
-    binary action tree is then traversed. Information-set keys contain only what
-    the acting player is allowed to know: player count, actor/history, flop and
-    that player's hole cards.
+    binary action tree is then traversed. Information sets preserve the exact
+    flop-relative two-card state modulo only true global suit isomorphism.
+
+    Hot-path keys are dense integers:
+
+        public_scenario_id * exact_hole_state_count + exact_hole_state_id
+
+    The 1,176 possible raw hole combinations on the fixed flop are mapped to
+    exact canonical state IDs once at initialization, avoiding repeated 24-suit
+    canonicalization inside every CFR node visit.
 
     This mirrors DeepKK's CFR+/linear-average architecture while preserving an
     explicit caveat: rake makes total utility path-dependent, and N>2 is a
-    multiplayer game. Output therefore remains experimental until it passes the
-    dedicated stability and best-response gates in P4.
+    multiplayer game. Output remains experimental until it passes the dedicated
+    stability and response gates in P4.
     """
 
     def __init__(
@@ -80,6 +98,7 @@ class ChanceSampledCFR:
         if len(flop) != 3:
             raise ValueError("flop must contain exactly 3 cards")
         require_unique(flop)
+
         self.num_players = num_players
         self.flop = tuple(flop)
         self.rules = PotFoldRules(num_players=num_players, ante=1.0)
@@ -93,11 +112,27 @@ class ChanceSampledCFR:
         self.seed = seed
         self.cfr_plus = cfr_plus
         self.linear_average = linear_average
-        self.nodes: Dict[str, InfoNode] = {}
+        self.nodes: Dict[int, InfoNode] = {}
+
+        # Exact per-flop state index. This is canonicalization only; no strategic
+        # card abstraction or bucketing is performed.
+        self.exact_index = ExactFlopHoleIndex.build(self.flop)
+        self.hole_state_count = len(self.exact_index)
+
+        excluded = set(self.flop)
+        self._deal_deck = tuple(c for c in full_deck() if c not in excluded)
+
+        # Precompute all 1,176 legal raw hole-pair -> exact dense-state mappings
+        # for this fixed flop. CFR then needs only a two-card tuple dictionary
+        # lookup instead of 24 suit permutations at each node.
+        raw_hole_to_state_id: dict[tuple[Card, Card], int] = {}
+        for hole in combinations(self._deal_deck, 2):
+            key = tuple(sorted(hole))
+            raw_hole_to_state_id[key] = self.exact_index.state_id(self.flop, hole)
+        self._raw_hole_to_state_id = raw_hole_to_state_id
 
     def _sample_deal(self) -> SampledDeal:
-        excluded = set(self.flop)
-        deck = [c for c in full_deck() if c not in excluded]
+        deck = list(self._deal_deck)
         self.rng.shuffle(deck)
         holes = []
         idx = 0
@@ -120,15 +155,16 @@ class ChanceSampledCFR:
             winners = tuple(active[j] for j in local_winners)
         return self.economy.terminal_utilities(stayed=state.stayed, winners=winners)
 
-    def _infoset_key(self, state: PotFoldState, deal: SampledDeal) -> str:
+    def _infoset_key(self, state: PotFoldState, deal: SampledDeal) -> int:
         assert state.to_act is not None
         actor = state.to_act
         prior_actions: list[Action] = []
         for i in range(actor):
             prior_actions.append(Action.STAY if state.stayed[i] else Action.FOLD)
-        scen = scenario_id(self.num_players, actor, prior_actions)
-        cards = canonical_flop_hole_id(self.flop, deal.holes[actor])
-        return f"{scen}|{cards}"
+        public_id = scenario_dense_id(self.num_players, actor, prior_actions)
+        raw_hole = tuple(sorted(deal.holes[actor]))
+        hole_id = self._raw_hole_to_state_id[raw_hole]
+        return public_id * self.hole_state_count + hole_id
 
     def _cfr(
         self,
@@ -183,4 +219,10 @@ class ChanceSampledCFR:
                 (1.0,) * self.num_players,
                 iteration,
             )
-        return SolveResult(iterations=iterations, seed=self.seed, nodes=self.nodes)
+        return SolveResult(
+            iterations=iterations,
+            seed=self.seed,
+            nodes=self.nodes,
+            hole_state_count=self.hole_state_count,
+            flop_key=self.exact_index.flop_key,
+        )
