@@ -14,7 +14,7 @@ from .cards import Card
 from .solver import ChanceSampledCFR, SolveResult
 from .validation import audit_to_dict, build_consensus
 
-PILOT_VERSION = "2026-09-07.2"
+PILOT_VERSION = "2026-09-07.3"
 
 
 def _source_hash() -> str:
@@ -27,6 +27,7 @@ def _source_hash() -> str:
         "evaluator.py",
         "exact_index.py",
         "game.py",
+        "hu_response.py",
         "scenarios.py",
         "solver.py",
         "state_space.py",
@@ -82,6 +83,50 @@ def _write_policy(path: Path, result: SolveResult) -> None:
                 f"{p_stay:.12g}",
                 node.visits,
             ])
+
+
+def _write_consensus_policy(path: Path, results: list[SolveResult]) -> int:
+    """Average seed policies without merging any exact information sets."""
+
+    if not results:
+        raise ValueError("at least one solve result is required")
+    hole_count = results[0].hole_state_count
+    flop_key = results[0].flop_key
+    for result in results[1:]:
+        if result.hole_state_count != hole_count or result.flop_key != flop_key:
+            raise ValueError("cannot average policies from different exact flop spaces")
+
+    policies = [result.average_policy() for result in results]
+    key_sets = [set(policy) for policy in policies]
+    shared = set.intersection(*key_sets)
+    union = set.union(*key_sets)
+    if shared != union:
+        raise ValueError("consensus policy requires identical infoset coverage across seeds")
+
+    with path.open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow([
+            "infoset_key",
+            "public_scenario_id",
+            "exact_hole_state_id",
+            "p_fold",
+            "p_stay",
+            "visits",
+        ])
+        for key in sorted(shared):
+            p_stay = sum(policy[key][1] for policy in policies) / len(policies)
+            p_fold = 1.0 - p_stay
+            public_id, hole_id = divmod(key, hole_count)
+            visits = sum(result.nodes[key].visits for result in results)
+            w.writerow([
+                key,
+                public_id,
+                hole_id,
+                f"{p_fold:.12g}",
+                f"{p_stay:.12g}",
+                visits,
+            ])
+    return len(shared)
 
 
 def main() -> None:
@@ -144,11 +189,13 @@ def main() -> None:
             "max_visits": visits[-1] if visits else 0,
         }
 
+    consensus_infosets = _write_consensus_policy(out / "policy_consensus.csv", results)
     pairwise, consensus = build_consensus(seed_policies)
     total_iterations = args.iterations * len(seeds)
     summary = {
         "pairwise": [audit_to_dict(x) for x in pairwise],
         "consensus": audit_to_dict(consensus),
+        "consensus_policy_infosets": consensus_infosets,
         "visits": visit_summary,
         "performance": {
             "wall_seconds": elapsed,
@@ -160,7 +207,11 @@ def main() -> None:
     manifest["stage"] = "completed"
     manifest["completed_at_unix"] = time.time()
     manifest["wall_seconds"] = elapsed
-    manifest["outputs"] = ["summary.json", *[f"policy_seed_{s}.csv" for s in seeds]]
+    manifest["outputs"] = [
+        "summary.json",
+        "policy_consensus.csv",
+        *[f"policy_seed_{s}.csv" for s in seeds],
+    ]
     (out / "RUN_MANIFEST.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
 
