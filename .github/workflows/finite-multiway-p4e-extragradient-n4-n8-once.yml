@@ -1,0 +1,170 @@
+name: Finite Multiway P4E Extragradient N4-N8 Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/p4e_n4_n8.trigger'
+
+jobs:
+  p4e-n4-n8:
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include:
+          - id: n4_rainbow
+            players: 4
+            flop: 'Ah 7d 2c'
+            iterations: 250000
+            eg_samples: 50000
+            response_samples: 250000
+          - id: n4_monotone
+            players: 4
+            flop: 'Ah 7h 2h'
+            iterations: 250000
+            eg_samples: 50000
+            response_samples: 250000
+          - id: n5_rainbow
+            players: 5
+            flop: 'Ah 7d 2c'
+            iterations: 100000
+            eg_samples: 25000
+            response_samples: 100000
+          - id: n5_monotone
+            players: 5
+            flop: 'Ah 7h 2h'
+            iterations: 100000
+            eg_samples: 25000
+            response_samples: 100000
+          - id: n6_rainbow
+            players: 6
+            flop: 'Ah 7d 2c'
+            iterations: 100000
+            eg_samples: 25000
+            response_samples: 100000
+          - id: n6_monotone
+            players: 6
+            flop: 'Ah 7h 2h'
+            iterations: 100000
+            eg_samples: 25000
+            response_samples: 100000
+          - id: n7_rainbow
+            players: 7
+            flop: 'Ah 7d 2c'
+            iterations: 100000
+            eg_samples: 25000
+            response_samples: 100000
+          - id: n7_monotone
+            players: 7
+            flop: 'Ah 7h 2h'
+            iterations: 100000
+            eg_samples: 25000
+            response_samples: 100000
+          - id: n8_rainbow
+            players: 8
+            flop: 'Ah 7d 2c'
+            iterations: 100000
+            eg_samples: 25000
+            response_samples: 100000
+          - id: n8_monotone
+            players: 8
+            flop: 'Ah 7h 2h'
+            iterations: 100000
+            eg_samples: 25000
+            response_samples: 100000
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build frozen exact CFR warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --players '${{ matrix.players }}' \
+            --flop '${{ matrix.flop }}' \
+            --iterations '${{ matrix.iterations }}' \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/${{ matrix.id }}
+      - name: Run frozen projected Nash extragradient
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_extragradient \
+            --players '${{ matrix.players }}' \
+            --policy runs/${{ matrix.id }}/policy_consensus.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 64 \
+            --predictor-samples-per-round '${{ matrix.eg_samples }}' \
+            --corrector-samples-per-round '${{ matrix.eg_samples }}' \
+            --initial-max-coordinate-radius 0.10 \
+            --seed-base 9602026 \
+            --out-policy runs/${{ matrix.id }}/policy_extragradient.csv \
+            --out-audit runs/${{ matrix.id }}/p4e_extragradient_audit.json
+      - name: Run original independent response gate
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_response \
+            --players '${{ matrix.players }}' \
+            --policy runs/${{ matrix.id }}/policy_extragradient.csv \
+            --flop '${{ matrix.flop }}' \
+            --learn-samples '${{ matrix.response_samples }}' \
+            --eval-samples '${{ matrix.response_samples }}' \
+            --seed 9302026 \
+            --rake-pct 0.02 \
+            --out runs/${{ matrix.id }}/p4e_response.json
+      - name: Apply frozen P4E promotion threshold
+        env:
+          CASE_ID: ${{ matrix.id }}
+          PLAYERS: ${{ matrix.players }}
+          FLOP: ${{ matrix.flop }}
+          ITERATIONS: ${{ matrix.iterations }}
+          EG_SAMPLES: ${{ matrix.eg_samples }}
+          RESPONSE_SAMPLES: ${{ matrix.response_samples }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('runs') / os.environ['CASE_ID']
+          summary = json.loads((root / 'summary.json').read_text())
+          response = json.loads((root / 'p4e_response.json').read_text())
+          coverage = summary['consensus']['shared_all_coverage']
+          seat_uppers = [x['ci95_high'] for x in response['unilateral_gain']]
+          result = {
+              'phase': 'P4E_N4_N8_PROJECTED_EXTRAGRADIENT_PROMOTION',
+              'case': os.environ['CASE_ID'],
+              'players': int(os.environ['PLAYERS']),
+              'flop': os.environ['FLOP'],
+              'coverage': coverage,
+              'seat_unilateral_gain_ci95_high': seat_uppers,
+              'threshold': 0.03,
+              'cfr_iterations_per_seed': int(os.environ['ITERATIONS']),
+              'cfr_seeds': 3,
+              'extragradient_rounds': 64,
+              'predictor_samples_per_round': int(os.environ['EG_SAMPLES']),
+              'corrector_samples_per_round': int(os.environ['EG_SAMPLES']),
+              'response_learn_samples': int(os.environ['RESPONSE_SAMPLES']),
+              'response_holdout_samples': int(os.environ['RESPONSE_SAMPLES']),
+              'radius_schedule': '0.10/sqrt(round)',
+          }
+          result['pass'] = coverage == 1.0 and all(x <= 0.03 for x in seat_uppers)
+          (root / 'p4e_gate.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          if not result['pass']:
+              raise SystemExit(1)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p4e-extragradient-${{ matrix.id }}
+          path: runs/${{ matrix.id }}/
