@@ -1,0 +1,43 @@
+name: Exact HU A72r Response Gate Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/exact-hu-response-a72r-once.yml'
+
+jobs:
+  response-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Train exact A72r 2M x 3 consensus
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --flop 'Ah 7d 2c' \
+            --iterations 2000000 \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/a72r_response_gate
+      - name: Finite 250k learn plus 250k holdout response audit
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.hu_response \
+            --policy runs/a72r_response_gate/policy_consensus.csv \
+            --flop 'Ah 7d 2c' \
+            --learn-samples 250000 \
+            --eval-samples 250000 \
+            --seed 9102026 \
+            --rake-pct 0.02 \
+            --out runs/a72r_response_gate/hu_response.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-hu-a72r-response-gate
+          path: runs/a72r_response_gate/
