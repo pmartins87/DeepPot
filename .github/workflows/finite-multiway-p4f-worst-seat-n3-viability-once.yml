@@ -1,0 +1,138 @@
+name: Finite Multiway P4F Worst-Seat N3 Viability Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/p4f_n3.trigger'
+
+jobs:
+  p4f-n3:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - id: n3_rainbow
+            flop: 'Ah 7d 2c'
+          - id: n3_monotone
+            flop: 'Ah 7h 2h'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build frozen exact CFR warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --players 3 \
+            --flop '${{ matrix.flop }}' \
+            --iterations 250000 \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/${{ matrix.id }}
+      - name: Build frozen FP warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_refine \
+            --players 3 \
+            --policy runs/${{ matrix.id }}/policy_consensus.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --samples-per-round 50000 \
+            --prior-weight 4 \
+            --seed-base 9402026 \
+            --out-policy runs/${{ matrix.id }}/policy_fp_warm.csv \
+            --out-audit runs/${{ matrix.id }}/fp_warm_audit.json
+      - name: Build frozen PED warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_ped \
+            --players 3 \
+            --policy runs/${{ matrix.id }}/policy_fp_warm.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --br-samples-per-round 50000 \
+            --gradient-samples-per-round 50000 \
+            --initial-max-coordinate-step 0.10 \
+            --seed-base 9502026 \
+            --out-policy runs/${{ matrix.id }}/policy_ped_warm.csv \
+            --out-audit runs/${{ matrix.id }}/ped_warm_audit.json
+      - name: Run frozen P4F primal-dual worst-seat mirror-prox
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_worst_seat \
+            --players 3 \
+            --policy runs/${{ matrix.id }}/policy_ped_warm.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --br-samples-per-stage 50000 \
+            --gradient-samples-per-stage 50000 \
+            --initial-primal-radius 0.05 \
+            --initial-dual-radius 0.50 \
+            --seed-base 9702026 \
+            --out-policy runs/${{ matrix.id }}/policy_p4f.csv \
+            --out-audit runs/${{ matrix.id }}/p4f_audit.json
+      - name: Run original independent response gate
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_response \
+            --players 3 \
+            --policy runs/${{ matrix.id }}/policy_p4f.csv \
+            --flop '${{ matrix.flop }}' \
+            --learn-samples 250000 \
+            --eval-samples 250000 \
+            --seed 9302026 \
+            --rake-pct 0.02 \
+            --out runs/${{ matrix.id }}/p4f_response.json
+      - name: Apply frozen P4F viability threshold
+        env:
+          CASE_ID: ${{ matrix.id }}
+          FLOP: ${{ matrix.flop }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('runs') / os.environ['CASE_ID']
+          summary = json.loads((root / 'summary.json').read_text())
+          response = json.loads((root / 'p4f_response.json').read_text())
+          coverage = summary['consensus']['shared_all_coverage']
+          seat_uppers = [x['ci95_high'] for x in response['unilateral_gain']]
+          result = {
+              'phase': 'P4F_N3_PRIMAL_DUAL_WORST_SEAT_VIABILITY',
+              'case': os.environ['CASE_ID'],
+              'players': 3,
+              'flop': os.environ['FLOP'],
+              'coverage': coverage,
+              'seat_unilateral_gain_ci95_high': seat_uppers,
+              'threshold': 0.03,
+              'warm_start': 'CFR250k_x3_FP32x50k_PED32x_BR50k_GRAD50k',
+              'method': 'P4F_primal_dual_mirror_prox_32x_BR50k_GRAD50k_per_stage',
+              'primal_radius_schedule': '0.05/sqrt(round)',
+              'dual_radius_schedule': '0.50/sqrt(round)',
+          }
+          result['pass'] = coverage == 1.0 and all(x <= 0.03 for x in seat_uppers)
+          (root / 'p4f_gate.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          if not result['pass']:
+              raise SystemExit(1)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p4f-worst-seat-${{ matrix.id }}
+          path: runs/${{ matrix.id }}/
