@@ -7,23 +7,24 @@ from typing import Optional
 
 class Action(str, Enum):
     FOLD = "FOLD"
-    STAY = "STAY"  # contributes exactly the initial pot (bet/call in UI terminology)
+    STAY = "STAY"
 
 
 @dataclass(frozen=True)
 class PotFoldRules:
-    """Mechanical Pot Fold rules independent of card evaluation and rake.
+    """Mechanical Pot Fold rules independent of cards and rake.
 
-    Player indices are already in flop action order, starting with the player in
-    the SB *position* (Pot Fold does not charge an SB blind).
+    Player indices are in flop action order. Index N-1 is the BTN and acts last.
+    Pot Fold charges antes, not SB/BB blinds; A0/A1/... are intentionally neutral
+    labels until the live OpenHoldem seat mapping is frozen.
     """
 
     num_players: int
     ante: float
 
     def __post_init__(self) -> None:
-        if self.num_players < 2:
-            raise ValueError("num_players must be >= 2")
+        if not 2 <= self.num_players <= 8:
+            raise ValueError("num_players must be between 2 and 8")
         if self.ante <= 0:
             raise ValueError("ante must be > 0")
 
@@ -38,13 +39,6 @@ class PotFoldRules:
 
 @dataclass(frozen=True)
 class PotFoldState:
-    """Single-flop-betting-round state.
-
-    `active[i]` means player i has not folded.
-    `acted[i]` means player i already made the one allowed flop decision.
-    `stayed[i]` records whether player i contributed the fixed initial-pot amount.
-    """
-
     rules: PotFoldRules
     active: tuple[bool, ...]
     acted: tuple[bool, ...]
@@ -54,13 +48,7 @@ class PotFoldState:
     @classmethod
     def initial(cls, rules: PotFoldRules) -> "PotFoldState":
         n = rules.num_players
-        return cls(
-            rules=rules,
-            active=(True,) * n,
-            acted=(False,) * n,
-            stayed=(False,) * n,
-            to_act=0,
-        )
+        return cls(rules, (True,) * n, (False,) * n, (False,) * n, 0)
 
     @property
     def active_count(self) -> int:
@@ -96,40 +84,26 @@ class PotFoldState:
     def apply(self, action: Action) -> "PotFoldState":
         if self.is_terminal or self.to_act is None:
             raise ValueError("cannot act in a terminal state")
-        if action not in self.legal_actions():
-            raise ValueError(f"illegal action: {action}")
-
         i = self.to_act
         active = list(self.active)
         acted = list(self.acted)
         stayed = list(self.stayed)
-
         acted[i] = True
         if action == Action.FOLD:
             active[i] = False
-        else:
+        elif action == Action.STAY:
             stayed[i] = True
+        else:
+            raise ValueError(f"illegal action: {action}")
 
-        # If only one player remains, the hand is over. This encodes the natural
-        # last-player/no-op terminal used by the AoF tree as well. P0 keeps this
-        # mechanic flagged for live-client confirmation before strategy publish.
+        # Live semantics confirmed by user observation: if every player before
+        # the final survivor folds, the survivor wins immediately and does not
+        # make/pay the fixed STAY action. Rake is handled by the economy layer.
         if sum(active) <= 1:
             nxt = None
         else:
-            nxt = None
-            for j in range(i + 1, self.rules.num_players):
-                if active[j] and not acted[j]:
-                    nxt = j
-                    break
-            if nxt is None:
-                # Every still-active player has completed the one flop decision.
-                # With >=2 active players, turn/river are chance-only showdown.
-                nxt = None
-
-        return PotFoldState(
-            rules=self.rules,
-            active=tuple(active),
-            acted=tuple(acted),
-            stayed=tuple(stayed),
-            to_act=nxt,
-        )
+            nxt = next(
+                (j for j in range(i + 1, self.rules.num_players) if active[j] and not acted[j]),
+                None,
+            )
+        return PotFoldState(self.rules, tuple(active), tuple(acted), tuple(stayed), nxt)
