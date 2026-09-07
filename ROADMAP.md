@@ -1,196 +1,311 @@
-# DeepPot Roadmap
+# DeepPot NLH Base v1 — finite execution roadmap
 
-## Project priority
+## Definition of done
 
-Build the **mathematical base strategy first**, following the DeepKK pattern. Opponent tracking and exploitation remain deliberately deferred until the base solver, validation, policy format and runtime are solid.
+This roadmap ends when **DeepPot NLH Base v1 is playing Pot Fold on the user's computer through OpenHoldem**, using the mathematical base strategy only.
 
-Second principle: **exact-state first**. DeepPot will preserve every strategically distinct flop+hole state and collapse only true suit isomorphisms. Lossy equity/potential/card bucketing is a fallback only if the optimized exact path later fails a measured computational-feasibility gate.
+Base v1 must:
 
-## P0 — Rules and economy gate
+- support 2 through 8 dealt players;
+- preserve every strategically distinct flop+hole state, collapsing only true global suit isomorphisms;
+- choose only FOLD or POT/STAY according to the solved policy;
+- use the frozen Pot Fold economy for the table/stake configuration being played;
+- log detected state, policy lookup and final action;
+- fail closed on unknown or inconsistent runtime state;
+- pass the finite shadow/live gates below.
 
-Status: **IN PROGRESS, no longer blocking engineering**
+Opponent exploitation, tracker statistics and PLO are **not blockers for Base v1**. They are later projects after the base IA is operational.
 
-- [x] Confirm official core rules: no blinds, all players ante, preflop skipped, action begins on flop, fixed pot-sized continue action or fold, automatic turn/river after flop action.
-- [x] Confirm NLH and PLO availability from official KKPoker source.
-- [x] Confirm table capacity: up to 8 seats.
-- [x] Confirm BTN is last to act in live Pot Fold.
-- [x] Confirm last-player/no-op terminal semantics when every previous player folds.
-- [x] Confirm uncontested pots are still raked.
-- [ ] Confirm exact Pot Fold rake % by variant/stake/player count/pot geometry.
-- [ ] Confirm exact Pot Fold rake cap and the unit used for the cap on ante-only tables.
-- [ ] Explain the live payout observations 84 -> 81.12 and 45 -> 43.38.
-- [ ] Confirm exact ante values/ranges shown in the KKPoker lobby.
-- [ ] Confirm insufficient-stack/side-pot behavior, if relevant.
-- [ ] Freeze rakeback/PVI treatment for the official strategy economy.
+## Execution discipline — no infinite test ladders
 
-**Gate P0:** engineering and pilot solving may proceed with parameterized economics. Do not label any strategy as the official economic solution until rake/cap/reward semantics are frozen.
-
-## P1 — NLH game kernel
-
-Status: **CORE COMPLETE**
-
-- [x] Card/deck model.
-- [x] Pot Fold action tree for 2–8 players.
-- [x] Fixed continue cost = initial pot.
-- [x] BTN-last neutral action ordering.
-- [x] Terminal showdown/runout logic.
-- [x] Uncontested-pot terminal logic, including zero-STAY BTN win.
-- [x] Nominal rake + cap model.
-- [x] Per-player terminal utilities and tie splitting.
-- [ ] Separate rakeback/PVI reward model.
-- [x] Unit tests for core terminal geometries.
-
-## P2 — Exact state canonicalization and equity engine
-
-Status: **EXACT REPRESENTATION PROVEN / PERFORMANCE OPTIMIZATION PENDING**
-
-- [x] Canonicalize flop + hole cards under all 24 suit permutations.
-- [x] Enumerate and regression-test the 1,755 standard NLH flop isomorphism classes.
-- [x] Prove exact flop+hole state count with Burnside's lemma: **1,286,792** states modulo only global suit relabeling.
-- [x] Document why `1,755 x 169` is not exact after the flop is visible.
-- [x] Regression-test exact state-space and public-scenario counts.
-- [x] Exact 5-card and 7-card evaluator.
-- [x] Exact cached-ready HU turn-river enumeration API (990 runouts for two known hands on a flop).
-- [x] Multiway showdown evaluator for known hands/runout.
-- [ ] Fast evaluator implementation suitable for production-scale solving.
-- [ ] Dense integer ID for every exact canonical flop+hole state.
-- [ ] Per-flop exact-state index tables.
-- [ ] Cache format with version/hash metadata.
-- [ ] Differential validation against an independent evaluator/library.
-
-## P3 — DeepPot exact base solver
-
-Status: **CHANCE-SAMPLED CFR PROTOTYPE IMPLEMENTED; OPTIMIZATION NEXT**
-
-The production target is not a 169-class-per-flop approximation. It is:
-
-`exact canonical flop+hole state | exact player count | exact public FOLD/STAY history -> policy`
-
-Suit relabeling is exact symmetry, not strategic abstraction.
-
-- [x] Fixed-flop subgame solver architecture.
-- [x] Binary actions: STAY/POT and FOLD.
-- [x] Modes parameterized for 2–8 players.
-- [x] Stable scenario/history naming with neutral A0/A1/.../BTN actors.
-- [x] Chance-sampled private cards + turn/river.
-- [x] Full binary action-tree traversal per sampled deal.
-- [x] CFR+ regret floor and linear strategy averaging prototype.
-- [x] Information-set keys expose only player count, actor/history, flop and actor hole cards.
-- [x] Deterministic-seed smoke tests, including 8-player execution.
-- [ ] Replace string-key dictionary hot path with dense integer-indexed node storage where possible.
-- [ ] Replace/accelerate terminal evaluator hot path.
-- [ ] Add batched/vectorized deal generation and updates analogous to DeepKK where mathematically valid.
-- [ ] Add production run configuration/manifest analogous to DeepKK.
-- [ ] Add multiprocessing by canonical flop.
-- [ ] Add checkpoint/resume and resumable per-flop work queue.
-- [ ] Add variance-reduction / alternative CFR sampling methods that preserve exact infosets.
-- [ ] Export immutable exact base policy + EV reference.
-- [ ] Decide whether production base solver remains CFR-family after validation of rake/multiplayer game-theory caveats.
-
-### Exact-state computational feasibility gate
-
-Before any lossy abstraction is allowed, measure the optimized exact path on representative flop textures and player counts.
-
-- [ ] Benchmark exact HU on low/medium/high canonical-hole-count flops.
-- [ ] Measure iterations/s, infoset-visits/s, terminal evaluations/s, peak RAM and policy bytes/state.
-- [ ] Run 10k -> 50k -> 100k -> larger cross-seed scaling on the same flop.
-- [ ] Estimate full 1,755-flop HU wall time from measured texture-weighted throughput.
-- [ ] Repeat staged estimates for 3w, 4w and upward only after HU passes.
-- [ ] If exact compute is expensive, optimize implementation before reducing state fidelity.
-- [ ] Lossy abstraction may be reconsidered only after this gate documents that exact-state solving is impractical within project resources.
-
-## P4 — Solver validation
-
-Status: **NEXT CRITICAL GATE**
-
-- [x] First 10k HU cross-seed pilot executed; result unstable because median exact-state visits were only ~8.
-- [ ] Higher-visit cross-seed policy stability on exact infosets.
-- [ ] Mean/max positive regret or the appropriate chosen-solver convergence metric.
-- [ ] Best-response/exploitability or equivalent response metric for HU.
-- [ ] Multiplayer response/robustness metrics for N>2.
-- [ ] EV confidence/error intervals.
-- [ ] Coverage/min-visits report per exact canonical state.
-- [ ] Exact-vs-sampled equity regression tests.
-- [ ] Reproducible run manifest and SHA256 hashes.
-- [ ] Validate the target-solution implications of path-dependent rake.
-- [ ] Validate the target-solution implications of multiplayer general-sum play before claiming equilibrium properties for N>2.
-
-## P5 — Operational exact base-policy format
-
-- [ ] Define policy key: variant | players | scenario | canonical_flop_hole_id.
-- [ ] Compact per-flop/indexed lookup format suitable for OpenHoldem DLL runtime.
-- [ ] Quantify probability quantization error if policy probabilities are stored as uint8/uint16.
-- [ ] Preserve mathematical policy separately from operational policy.
-- [ ] Safe unknown-state fallback.
-- [ ] Version policy by complete economic configuration.
-- [ ] Do not merge strategically distinct states in the operational export.
-
-## P6 — OpenHoldem base runtime
-
-This is intentionally brought before exploitation. The first live DeepPot must be able to play **base strategy only**.
-
-- [ ] Pot Fold tablemap/scraper validation.
-- [ ] Dynamic 2–8 player action-order mapping with BTN last.
-- [ ] Formula scenario detection.
-- [ ] Exact canonical flop+hole runtime key.
-- [ ] DLL/base-policy lookup.
-- [ ] Single decision symbol.
-- [ ] HIT/MISS/mismatch logs.
-- [ ] Fail closed on unknown state.
-- [ ] Dedicated runtime profile separate from AoF and Crusher.
-- [ ] Shadow mode before autoplayer.
-
-## P7 — Base live validation
-
-- [ ] Compare detected state with reviewed hands/screenshots/logs.
-- [ ] Verify actual rake/fee deductions against model.
-- [ ] Small-stakes controlled base-only test.
-- [ ] Validate recommendation/action agreement.
-- [ ] Publish DeepPot NLH Base v1 only after mechanics/economy match reality.
+1. The phases and gates below are the complete path to Base v1.
+2. We do **not** add another iteration rung merely because a probability-stability number can be improved further.
+3. A failed gate receives at most **one planned solver/implementation correction and one rerun of the failing gate**. If it still fails, the phase is explicitly BLOCKED and we change the method; we do not keep adding tests.
+4. New unit/regression tests are allowed only when needed to protect a concrete bug fix or a roadmap feature. They do not create new validation phases.
+5. Cross-seed probability agreement is diagnostic. Release quality is decided primarily by state coverage, EV/response quality and runtime correctness.
+6. Strategic card abstraction is not planned for Base v1. It may be reconsidered only if the exact path reaches a documented compute blocker after the single optimization pass allowed by this roadmap.
 
 ---
 
-# Exploitation phase — intentionally after Base v1
+# P0 — Mechanics and economy freeze
 
-## P8 — Pot Fold tracker / frame reconstructor
+Status: **MECHANICS COMPLETE / ECONOMY PENDING**
 
-Reuse the proven DeepKK structure, but reconstruct flop decisions instead of preflop all-in/fold.
+Completed:
 
-- [ ] Frame schema.
-- [ ] Hand audit table.
-- [ ] Reconstructed actions table.
-- [ ] Action-level eligibility flags.
-- [ ] Pot/stack/card-state transition rules.
-- [ ] Hero-context separation.
-- [ ] Validation SQL.
+- [x] no practical SB/BB forced-blind payments; every dealt player posts the same ante;
+- [x] preflop skipped;
+- [x] one flop decision street;
+- [x] FOLD or fixed POT/STAY action;
+- [x] BTN last to act;
+- [x] 2–8 dealt players;
+- [x] automatic turn/river after the flop action when 2+ players remain;
+- [x] uncontested terminal when everybody before the last survivor folds;
+- [x] uncontested pots are raked.
 
-## P9 — Opponent identity and statistics
+Economy closure:
 
-- [ ] PlayerAliases.
-- [ ] AutoAliasCandidates.
-- [ ] Alias flattening.
-- [ ] OpponentStats by variant/player-count/scenario and an exact-state or separately validated statistical feature model.
-- [ ] PoolStats priors.
-- [ ] Shrinkage/confidence model.
+- [ ] freeze Pot Fold rake percentage/cap/rules for the stake configuration used by Base v1;
+- [ ] freeze whether any separately attributed reward/rakeback component should enter decision EV;
+- [ ] encode economy profile ID into every production policy manifest.
 
-## P10 — Exploit: HU and VS1
+Finite evidence rule: use a Pot-Fold-specific official KKPoker schedule if one becomes available. Otherwise use **at most 12 clean live payout observations** chosen across relevant player-count/pot geometries. If those prove that more than one economy profile exists, Base v1 supports only the profile(s) actually identified; we do not keep collecting an unlimited sample.
 
-- [ ] Exact/fixed-opponent best-response profiles.
-- [ ] Sample thresholds and shrinkage.
-- [ ] MESPolicy-equivalent table for Pot Fold.
-- [ ] Fallback to DeepPot base on weak evidence.
+Engineering may continue under the current provisional 2% model. **Final all-flop production solving waits for P0 PASS.**
 
-## P11 — Multiway exploit
+---
 
-- [ ] Full observed vector by relevant opponents.
-- [ ] Cartesian catalog only for actually observed vectors.
-- [ ] Train missing vectors.
-- [ ] Runtime enable gate only after catalog coverage is complete for the published snapshot.
+# P1 — NLH game kernel
 
-## P12 — PLO extensions
+Status: **PASS**
 
-- [ ] PLO4 Pot Fold.
-- [ ] PLO5 Pot Fold.
-- [ ] Omaha exact-card-use evaluator.
-- [ ] Exact PLO state-space/canonicalization study before any abstraction decision.
-- [ ] Separate strategies and validation artifacts.
+- [x] card/deck model;
+- [x] exact 2–8 player Pot Fold action tree;
+- [x] fixed continue cost = initial ante pot;
+- [x] BTN-last neutral action order;
+- [x] uncontested and showdown terminals;
+- [x] parameterized rake/cap;
+- [x] tie splitting and per-player utilities;
+- [x] core regression tests.
+
+No further work is planned in P1 unless a concrete live-mechanics bug is discovered.
+
+---
+
+# P2 — Lossless card/state representation
+
+Status: **PASS**
+
+- [x] 1,755 canonical NLH flops under suit isomorphism;
+- [x] exact flop+hole canonicalization;
+- [x] exact state-space proof/regression: **1,286,792** flop+hole states modulo only true suit relabeling;
+- [x] exact per-flop dense hole-state index;
+- [x] dense public-history IDs for 2–8 players;
+- [x] dense exact infoset keys;
+- [x] exact 5/7-card evaluator;
+- [x] faster direct exact 7-card evaluator;
+- [x] differential regression against the original exact evaluator;
+- [x] exact HU 990-runout equity API;
+- [x] multiway showdown evaluator.
+
+The old shorthand `1,755 x 169` is not used in production because it merges strategically different post-flop suit relationships.
+
+---
+
+# P3 — Exact solver engine and throughput gate
+
+Status: **IN PROGRESS**
+
+Already implemented:
+
+- [x] fixed-flop exact-state chance-sampled CFR+ candidate;
+- [x] linear average strategy;
+- [x] full binary action-tree traversal per sampled deal;
+- [x] dense integer infoset keys;
+- [x] precomputed raw-hole -> exact-state map;
+- [x] direct exact terminal evaluator;
+- [x] reproducible manifests and seed policies;
+- [x] cross-seed exact consensus-policy export;
+- [x] multiprocessing across independent seeds for pilots.
+
+Remaining production engineering:
+
+- [ ] checkpoint/resume per canonical flop;
+- [ ] resumable all-flop work queue;
+- [ ] multiprocessing by canonical flop for the Ryzen 9;
+- [ ] compact node storage if the N=5–8 benchmark shows RAM/throughput requires it;
+- [ ] production manifest with source/economy/config hashes.
+
+### One finite throughput benchmark
+
+Run exactly one representative throughput benchmark per player count before the all-flop solve:
+
+- N=2: 50k sampled deals;
+- N=3: 20k;
+- N=4: 10k;
+- N=5: 5k;
+- N=6: 2k;
+- N=7: 1k;
+- N=8: 500.
+
+Use the max-state rainbow flop `Ah 7d 2c`. The purpose is runtime/RAM projection only, not strategy validation.
+
+If projected production runtime or RAM is unacceptable, perform **one implementation optimization pass** and repeat this same benchmark once. No additional benchmark ladder is allowed.
+
+---
+
+# P4 — Finite solver-quality calibration
+
+Status: **IN PROGRESS**
+
+## P4A — HU A72r ladder: CLOSED
+
+Completed fixed ladder on `Ah 7d 2c`, provisional 2% rake:
+
+- [x] 10k x 3 seeds;
+- [x] 50k x 3 seeds;
+- [x] 250k x 3 seeds;
+- [x] 1M x 3 seeds;
+- [x] 2M x 3 seeds.
+
+At 2M x 3:
+
+- 100% shared infoset coverage;
+- ~1,700 median visits/infoset;
+- pairwise greedy agreement ~94.7–95.2%;
+- all-three greedy agreement 92.56%;
+- pairwise mean absolute P(STAY) difference ~0.037–0.038.
+
+**No 5M/10M/etc A72r seed ladder will be added.** The next metric is unilateral response gain.
+
+## P4B — HU response gate
+
+- [x] implement split-sample unilateral best-response validator with independent holdout and 95% CI;
+- [ ] validate the 2M x 3 consensus policy on A72r using exactly **250k learn + 250k holdout samples**;
+- [ ] run the same 2M x 3 + response gate on exactly three additional representative flops:
+  - `Ah 7h 2c` — two-tone;
+  - `Ah 7h 2h` — monotone;
+  - `Ah Ad 2c` — paired.
+
+HU PASS criteria for each representative flop:
+
+- exact infoset coverage = 100%;
+- pairwise greedy agreement >= 90%;
+- player-0 unilateral gain 95% upper bound <= **0.02 ante**;
+- player-1 unilateral gain 95% upper bound <= **0.02 ante**;
+- total response/NashConv gain 95% upper bound <= **0.03 ante**.
+
+If one or more flops fail, make **one solver-method correction** targeted at response quality and rerun only the failing representative flop(s) once. If still failing, P4 is BLOCKED; do not add another iteration ladder.
+
+## P4C — Multiway representative gate
+
+After HU PASS, validate N=3..8 on exactly two representative textures each:
+
+- `Ah 7d 2c` — max-state rainbow;
+- `Ah 7h 2h` — low-state monotone.
+
+For each N:
+
+- [ ] train the fixed production candidate budget selected from P3/P4A calibration;
+- [ ] require 100% intended exact-state coverage for the published policy;
+- [ ] run one finite unilateral-response/robustness holdout audit per seat;
+- [ ] record EV and response gain with confidence intervals.
+
+Multiway response sample budget is fixed at:
+
+- N=3–4: 250k learn + 250k holdout;
+- N=5–8: 100k learn + 100k holdout.
+
+PASS threshold: no seat may have unilateral gain 95% upper bound above **0.03 ante** on either representative texture.
+
+As with HU, one solver-method correction + one rerun of failing cases is the maximum.
+
+P4 ends with a single frozen solver configuration and production iteration budget for each player-count mode N=2..8.
+
+---
+
+# P5 — Full exact production solve
+
+Status: **NOT STARTED**
+
+Prerequisites: P0, P3 and P4 PASS.
+
+- [ ] enumerate all 1,755 canonical flops;
+- [ ] solve N=2 through N=8 using the frozen per-mode production configuration;
+- [ ] process flops independently with Ryzen-9 multiprocessing;
+- [ ] checkpoint after every completed flop;
+- [ ] resume cleanly after interruption;
+- [ ] export exact policy + EV/reference metadata;
+- [ ] hash every policy shard and final manifest;
+- [ ] verify exactly 1,755 completed flop shards per supported player-count mode;
+- [ ] no strategically lossy bucketing.
+
+This is the only large production compute run. We do not launch a second complete solve unless a concrete bug invalidates the first.
+
+---
+
+# P6 — Operational policy compiler
+
+Status: **NOT STARTED**
+
+- [ ] define final key: economy profile | N | public scenario | canonical flop | exact hole-state ID;
+- [ ] compile per-flop exact policies into compact binary lookup files;
+- [ ] preserve the uncompressed mathematical source policies separately;
+- [ ] store probabilities with enough precision that quantization changes no validated action materially;
+- [ ] version/hash policy files;
+- [ ] implement explicit MISS/unknown-state failure path;
+- [ ] build a standalone lookup test utility.
+
+Finite compiler gate: exhaustive key round-trip over every exported infoset once. PASS requires zero key/action mismatches.
+
+---
+
+# P7 — OpenHoldem / DeepPot runtime on the user's PC
+
+Status: **NOT STARTED**
+
+Reuse the proven DeepKK/OpenHoldem structure where applicable, but keep DeepPot as a separate runtime/profile.
+
+- [ ] Pot Fold tablemap/scraper;
+- [ ] detect dealt player count 2–8;
+- [ ] detect BTN and fixed flop action order;
+- [ ] detect prior FOLD/STAY history;
+- [ ] read hero hole cards + flop;
+- [ ] canonicalize exact runtime state identically to the solver;
+- [ ] DLL/binary-policy lookup;
+- [ ] output only FOLD or POT/STAY;
+- [ ] HIT/MISS/state/action logs;
+- [ ] fail closed on ambiguity;
+- [ ] dedicated DeepPot OpenHoldem profile;
+- [ ] Windows package/instructions for the user's machine.
+
+---
+
+# P8 — Finite shadow-mode gate
+
+Status: **NOT STARTED**
+
+Run DeepPot attached to the live table with **autoplayer disabled**.
+
+Audit exactly **200 consecutive valid Pot Fold decisions**.
+
+PASS requires:
+
+- 200/200 correct player-count/BTN/history detections;
+- 200/200 correct hero cards/flop recognition;
+- 200/200 policy lookup HITs for supported states;
+- zero illegal recommended actions;
+- zero state-key mismatches in manual spot checks/log reconstruction.
+
+If a concrete runtime bug appears, fix it and repeat the 200-decision gate **once**. Do not create successive shadow-test rounds for cosmetic differences.
+
+---
+
+# P9 — Autoplayer live gate and Base v1 release
+
+Status: **NOT STARTED**
+
+At the smallest practical Pot Fold stake:
+
+- [ ] enable autoplayer;
+- [ ] run exactly **200 valid decisions** under Base strategy;
+- [ ] verify zero illegal/missed actions;
+- [ ] verify runtime logs agree with actual table state;
+- [ ] verify observed rake/payout still matches the frozen P0 economy profile;
+- [ ] freeze and tag **DeepPot NLH Base v1**.
+
+Profit/loss over 200 decisions is **not** a release criterion because short-run poker variance is not a software-correctness test.
+
+## ROADMAP COMPLETE
+
+When P9 passes, the requested objective is achieved: **the DeepPot IA is playing Pot Fold on the user's computer using the exact mathematical base strategy.**
+
+---
+
+# After Base v1 — separate, non-blocking roadmap
+
+Only after the above is complete do we start the DeepKK-style exploitation layer:
+
+`tracker/frame reconstructor -> aliases -> OpponentStats/PoolStats -> HU/VS1 exploit -> multiway exploit -> fallback to frozen Base v1`
+
+PLO Pot Fold is also a separate post-Base-v1 project.
