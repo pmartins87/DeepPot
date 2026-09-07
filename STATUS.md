@@ -22,7 +22,7 @@ Current phase summary:
 - **P4D FP-PED:** BLOCKED;
 - **P4E projected Nash extragradient:** BLOCKED;
 - **P4F primal-dual worst-seat mirror-prox:** BLOCKED;
-- **P4G deterministic fixed-corpus worst-seat mirror-prox:** N=3 finite viability gate RUNNING;
+- **P4G deterministic fixed-corpus worst-seat mirror-prox:** N=3 PASS; N=4..8 frozen scaling gate READY;
 - P5+ waits for P0/P4 closure.
 
 ## Mechanics confirmed
@@ -139,29 +139,30 @@ The frozen N=3 P4F gate completed with 100% coverage in both textures:
 
 The rainbow failure blocks P4F, so no P4F N=4..8 scaling run is launched. Full result: `docs/P4F_RESULT.md`.
 
-P4F also exposed an optimization-estimator mismatch: independently sampled BR-learning and gradient blocks frequently produced negative internal `seat_gaps`, and the final rainbow dual weights concentrated on seat 0 even though the untouched holdout found seat 2 to be the worst exploitable seat. This motivates an estimator reset rather than another P4F parameter ladder.
+P4F also exposed an optimization-estimator mismatch: independently sampled BR-learning and gradient blocks frequently produced negative internal `seat_gaps`, and the final rainbow dual weights concentrated on seat 0 even though the untouched holdout found seat 2 to be the worst exploitable seat.
 
-### P4G deterministic fixed-corpus worst-seat mirror-prox: RUNNING
+### P4G deterministic fixed-corpus worst-seat mirror-prox: N=3 PASS / SCALING READY
 
-P4G is implemented in `src/deeppot/multiway_fixed_corpus.py` and its complete N=3 protocol was frozen before results in `docs/P4G_FIXED_CORPUS_METHOD_RESET.md`.
+P4G is implemented in `src/deeppot/multiway_fixed_corpus.py`. Its N=3 protocol was frozen before results in `docs/P4G_FIXED_CORPUS_METHOD_RESET.md`.
 
-Core change:
+The frozen N=3 run `34167399145` passed both representative textures with 100% coverage:
 
-- generate one immutable 50,000-deal chance corpus per flop;
-- reuse that exact corpus for every BR, seat-gap and gradient estimate throughout optimization;
-- learn and evaluate each empirical BR on the same corpus, making empirical unilateral gain non-negative apart from numerical roundoff;
-- use softmax weights (`beta=100`) over current empirical seat gaps to target the worst seat directly;
-- apply deterministic predictor/corrector projected mirror-prox with radius `0.05/sqrt(round)` for exactly 32 rounds;
-- retain exact card states and no strategic abstraction;
-- keep the original 250k-learn + independent 250k-holdout response gate untouched.
+| flop | seat 0 upper | seat 1 upper | seat 2 upper | result |
+|---|---:|---:|---:|---|
+| `Ah 7h 2h` | 0.007285 | 0.009602 | 0.011770 | PASS |
+| `Ah 7d 2c` | 0.021620 | 0.022696 | **0.029529** | PASS |
 
-Regression tests cover fixed-corpus reproducibility/hash stability, same-corpus BR non-negative-gap behavior, smooth-worst-seat weights, deterministic replay and policy-simplex preservation. CI passed before the P4G viability trigger.
+The rainbow seat-2 result is close to the `0.030000` threshold, so P4G is promoted but not overclaimed. Full N=3 result: `docs/P4G_N3_RESULT.md`.
 
-Current P4G N=3 workflow run: `34167399145`.
+The fixed-corpus reset removed the P4F negative-gap pathology: across all P4G N=3 predictor/corrector stages, materially negative same-corpus empirical seat-gap count was zero.
+
+Per the predeclared promotion rule, the N=4..8 schedule has now been frozen **before any N=4 P4G result** in `docs/P4G_N4_N8_SCALING_PROTOCOL.md`. It keeps the same 32-round FP/PED/P4G chain, beta/radius/objective and exact-state representation, while scaling the finite chance-sample budget for the exponentially larger public trees.
+
+Prepared workflow: `.github/workflows/finite-multiway-p4g-fixed-corpus-n4-n8-scaling-once.yml`.
 
 ## Next branch
 
-If both frozen P4G N=3 cases PASS, freeze the N=4..8 scaling schedule before observing any N=4 result. If either fails, mark P4G BLOCKED and change method rather than adding a P4G tuning ladder.
+Execute the frozen ten-case P4G scaling gate for N=4..8. For each N, both rainbow and monotone must pass. Any failed mode is frozen as P4G BLOCKED for that N and requires a solver-method change rather than a P4G parameter ladder.
 
 P5 all-1,755-flop production solving begins only after both P0 economy and P4 calibration are closed.
 
