@@ -1,4 +1,7 @@
+from itertools import combinations
+
 from deeppot.cards import Card
+from deeppot.evaluator import showdown_winners
 from deeppot.solver import ChanceSampledCFR
 
 
@@ -21,6 +24,18 @@ def test_hu_solver_smoke_is_reproducible() -> None:
         assert public_id in (0, 1)
         assert 0 <= hole_id < 1176
         assert abs(sum(strategy) - 1.0) < 1e-12
+
+
+def test_cached_final_ranks_match_exact_showdown_for_active_subsets() -> None:
+    solver = ChanceSampledCFR(num_players=5, flop=cards("Ah 7d 2c"), seed=321)
+    deal = solver._sample_deal()
+    board = solver.flop + (deal.turn, deal.river)
+    for active in combinations(range(5), 3):
+        best = max(deal.final_ranks[i] for i in active)
+        cached_winners = tuple(i for i in active if deal.final_ranks[i] == best)
+        local = showdown_winners(tuple(deal.holes[i] for i in active), board)
+        exact_winners = tuple(active[j] for j in local)
+        assert cached_winners == exact_winners
 
 
 def test_eight_player_solver_smoke() -> None:
