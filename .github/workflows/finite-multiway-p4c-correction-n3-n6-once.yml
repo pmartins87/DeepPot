@@ -1,0 +1,146 @@
+name: Finite Multiway P4C Correction N3-N6 Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finite-multiway-p4c-correction-n3-n6-once.yml'
+
+jobs:
+  corrected-p4c:
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - id: n3_rainbow
+            players: 3
+            flop: 'Ah 7d 2c'
+            iterations: 250000
+            gate_samples: 250000
+            refine_samples: 50000
+          - id: n3_monotone
+            players: 3
+            flop: 'Ah 7h 2h'
+            iterations: 250000
+            gate_samples: 250000
+            refine_samples: 50000
+          - id: n4_rainbow
+            players: 4
+            flop: 'Ah 7d 2c'
+            iterations: 250000
+            gate_samples: 250000
+            refine_samples: 50000
+          - id: n4_monotone
+            players: 4
+            flop: 'Ah 7h 2h'
+            iterations: 250000
+            gate_samples: 250000
+            refine_samples: 50000
+          - id: n5_rainbow
+            players: 5
+            flop: 'Ah 7d 2c'
+            iterations: 100000
+            gate_samples: 100000
+            refine_samples: 25000
+          - id: n5_monotone
+            players: 5
+            flop: 'Ah 7h 2h'
+            iterations: 100000
+            gate_samples: 100000
+            refine_samples: 25000
+          - id: n6_rainbow
+            players: 6
+            flop: 'Ah 7d 2c'
+            iterations: 100000
+            gate_samples: 100000
+            refine_samples: 25000
+          - id: n6_monotone
+            players: 6
+            flop: 'Ah 7h 2h'
+            iterations: 100000
+            gate_samples: 100000
+            refine_samples: 25000
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Rebuild the same frozen raw exact candidate
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --players '${{ matrix.players }}' \
+            --flop '${{ matrix.flop }}' \
+            --iterations '${{ matrix.iterations }}' \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/${{ matrix.id }}
+      - name: Apply the single frozen multiway response correction
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_refine \
+            --players '${{ matrix.players }}' \
+            --policy runs/${{ matrix.id }}/policy_consensus.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --samples-per-round '${{ matrix.refine_samples }}' \
+            --prior-weight 4 \
+            --seed-base 9402026 \
+            --out-policy runs/${{ matrix.id }}/policy_refined.csv \
+            --out-audit runs/${{ matrix.id }}/multiway_refinement_audit.json
+      - name: Rerun the original frozen P4C response gate once
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_response \
+            --players '${{ matrix.players }}' \
+            --policy runs/${{ matrix.id }}/policy_refined.csv \
+            --flop '${{ matrix.flop }}' \
+            --learn-samples '${{ matrix.gate_samples }}' \
+            --eval-samples '${{ matrix.gate_samples }}' \
+            --seed 9302026 \
+            --rake-pct 0.02 \
+            --out runs/${{ matrix.id }}/multiway_response_after_correction.json
+      - name: Apply unchanged frozen P4C threshold
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('runs') / os.environ['CASE_ID']
+          summary = json.loads((root / 'summary.json').read_text())
+          response = json.loads((root / 'multiway_response_after_correction.json').read_text())
+          coverage = summary['consensus']['shared_all_coverage']
+          seat_uppers = [x['ci95_high'] for x in response['unilateral_gain']]
+          result = {
+              'case': os.environ['CASE_ID'],
+              'players': int(os.environ['PLAYERS']),
+              'flop': os.environ['FLOP'],
+              'coverage': coverage,
+              'seat_unilateral_gain_ci95_high': seat_uppers,
+              'threshold': 0.03,
+              'correction': '32_round_finite_multiplayer_fictitious_response_average',
+          }
+          result['pass'] = coverage == 1.0 and all(x <= 0.03 for x in seat_uppers)
+          (root / 'p4c_gate_after_correction.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          if not result['pass']:
+              raise SystemExit(1)
+          PY
+        env:
+          CASE_ID: ${{ matrix.id }}
+          PLAYERS: ${{ matrix.players }}
+          FLOP: ${{ matrix.flop }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p4c-corrected-${{ matrix.id }}
+          path: runs/${{ matrix.id }}/
