@@ -7,7 +7,7 @@ from typing import Dict, Sequence
 
 from .cards import Card, full_deck, require_unique
 from .economics import PotFoldEconomy
-from .evaluator import showdown_winners
+from .evaluator import HandRank, evaluate_seven
 from .exact_index import ExactFlopHoleIndex
 from .game import Action, PotFoldRules, PotFoldState
 from .scenarios import scenario_dense_id
@@ -40,6 +40,7 @@ class SampledDeal:
     holes: tuple[tuple[Card, Card], ...]
     turn: Card
     river: Card
+    final_ranks: tuple[HandRank, ...]
 
 
 @dataclass
@@ -62,7 +63,7 @@ class SolveResult:
 
 
 class ChanceSampledCFR:
-    """Prototype exact-state base solver for a fixed-flop Pot Fold subgame.
+    """Exact-state base-solver candidate for one fixed Pot Fold flop.
 
     Chance is sampled once per iteration: private hands plus turn/river. The full
     binary action tree is then traversed. Information sets preserve the exact
@@ -76,10 +77,16 @@ class ChanceSampledCFR:
     exact canonical state IDs once at initialization, avoiding repeated 24-suit
     canonicalization inside every CFR node visit.
 
+    Terminal showdown ranks are also computed exactly ONCE per player per sampled
+    deal. Every terminal public history for that deal reuses those ranks. This is
+    especially important for N=5..8, where a full binary public tree would
+    otherwise re-evaluate the same seven-card hands many times. The optimization
+    changes no game state, chance distribution, payoff, or strategic abstraction.
+
     This mirrors DeepKK's CFR+/linear-average architecture while preserving an
     explicit caveat: rake makes total utility path-dependent, and N>2 is a
     multiplayer game. Output remains experimental until it passes the dedicated
-    stability and response gates in P4.
+    finite response gates in P4.
     """
 
     def __init__(
@@ -140,7 +147,9 @@ class ChanceSampledCFR:
             holes.append((deck[idx], deck[idx + 1]))
             idx += 2
         turn, river = deck[idx], deck[idx + 1]
-        return SampledDeal(tuple(holes), turn, river)
+        board = self.flop + (turn, river)
+        final_ranks = tuple(evaluate_seven(tuple(hole) + board) for hole in holes)
+        return SampledDeal(tuple(holes), turn, river, final_ranks)
 
     def _terminal_utility(self, state: PotFoldState, deal: SampledDeal) -> tuple[float, ...]:
         active = [i for i, alive in enumerate(state.active) if alive]
@@ -149,10 +158,8 @@ class ChanceSampledCFR:
         if len(active) == 1:
             winners = (active[0],)
         else:
-            board = self.flop + (deal.turn, deal.river)
-            active_hands = [deal.holes[i] for i in active]
-            local_winners = showdown_winners(active_hands, board)
-            winners = tuple(active[j] for j in local_winners)
+            best = max(deal.final_ranks[i] for i in active)
+            winners = tuple(i for i in active if deal.final_ranks[i] == best)
         return self.economy.terminal_utilities(stayed=state.stayed, winners=winners)
 
     def _infoset_key(self, state: PotFoldState, deal: SampledDeal) -> int:
