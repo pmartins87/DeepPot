@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/exact-hu-stability-once.yml'
 
+# evaluator: direct-seven-card-v1-fixed
 jobs:
   stability:
     runs-on: ubuntu-latest
