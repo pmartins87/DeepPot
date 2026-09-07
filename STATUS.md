@@ -20,7 +20,8 @@ Current phase summary:
 - **P4 HU:** PASS and closed;
 - **P4C original multiway CFR/FP:** BLOCKED;
 - **P4D FP-PED:** BLOCKED;
-- **P4E projected Nash extragradient:** N=3 finite viability gate RUNNING;
+- **P4E projected Nash extragradient:** BLOCKED;
+- **P4F primal-dual worst-seat mirror-prox:** N=3 finite viability gate RUNNING;
 - P5+ waits for P0/P4 closure.
 
 ## Mechanics confirmed
@@ -115,32 +116,44 @@ Frozen N=3 viability results:
 
 The rainbow failure blocks P4D. No extra rounds, samples, altered radius or checkpoint selection are allowed.
 
-### P4E projected Nash extragradient: RUNNING
+### P4E projected Nash extragradient: BLOCKED
 
-P4E changes the mathematical target. For each exact infoset it estimates the player's own conditional action advantage:
+The frozen N=3 P4E gate completed with 100% coverage in both textures:
 
-`A(I) = E[u(STAY) - u(FOLD) | I, opponents]`
+| flop | seat 0 upper | seat 1 upper | seat 2 upper | result |
+|---|---:|---:|---:|---|
+| `Ah 7h 2h` | 0.009051 | 0.016615 | 0.016012 | PASS |
+| `Ah 7d 2c` | **0.036877** | 0.019004 | **0.033603** | FAIL |
 
-and applies an independent predictor/corrector projected extragradient to the binary Nash complementarity conditions.
+Because the rainbow case has two seats above 0.030000, P4E is blocked. The predeclared N=4..8 P4E workflow is **not triggered**. No P4E round/sample/radius/checkpoint tuning is allowed. Full result: `docs/P4E_RESULT.md`.
 
-Frozen N=3 viability protocol:
+### P4F primal-dual worst-seat mirror-prox: RUNNING
 
-- rainbow `Ah 7d 2c` and monotone `Ah 7h 2h` only;
-- CFR warm start `250k x 3`;
-- 64 extragradient rounds;
-- 50k predictor + 50k independent corrector samples/round;
-- radius `0.10 / sqrt(round)`;
-- original 250k-learn + 250k-holdout response validator;
+P4F changes the objective to match the release gate directly:
+
+`min_policy max_seat [u_seat(BR_seat(policy_-seat), policy_-seat) - u_seat(policy)]`.
+
+It maintains a dual probability simplex over seats. Seats with larger estimated unilateral deviation gaps receive greater dual weight; the policy step descends the dual-weighted seat-specific exploitability gradient. Predictor and corrector stages use independent BR-learning/gradient blocks.
+
+The complete N=3 protocol was frozen before P4F results in `docs/P4F_PRIMAL_DUAL_WORST_SEAT_METHOD_RESET.md`:
+
+- fixed final P4D policy as deterministic warm start (`CFR 250k x3 -> FP 32x50k -> PED 32x(50k BR + 50k gradient)`);
+- 32 primal-dual mirror-prox rounds;
+- each predictor stage: 50k BR learn + independent 50k gap/gradient;
+- each corrector stage: fresh 50k BR learn + independent 50k gap/gradient;
+- policy radius `0.05/sqrt(round)`;
+- dual radius `0.50/sqrt(round)`;
+- original response gate 250k learn + 250k holdout;
 - every seat upper 95% <= 0.03 ante;
 - no early stopping/tuning/checkpoint selection.
 
-The N=4..8 promotion schedule was predeclared **before the N=3 results were known** in `docs/P4E_N4_N8_SCALING_SCHEDULE.md`. Its workflow is prepared but deliberately gated by `.github/p4e_n4_n8.trigger`, so it cannot run unless both N=3 cases pass first.
+Seat-specific gradient finite-difference tests and primal/dual simplex invariants passed CI before the viability workflow was launched.
 
-Current N=3 workflow run: `34160799208`.
+Current P4F N=3 workflow run: `34161823920`.
 
 ## Next branch
 
-If both P4E N=3 cases PASS, create the predeclared trigger and execute the ten N=4..8 rainbow/monotone promotion cases exactly once. If either fails, mark P4E BLOCKED and change solver method rather than adding a parameter ladder.
+If both P4F N=3 cases PASS, freeze the N=4..8 scaling schedule before seeing any N=4 result and execute the ten already-defined rainbow/monotone representative cases once. If either fails, mark P4F BLOCKED and change solver method rather than adding a P4F parameter ladder.
 
 P5 all-1,755-flop production solving begins only after both P0 economy and P4 calibration are closed.
 
