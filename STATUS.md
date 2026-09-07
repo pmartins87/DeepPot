@@ -4,163 +4,150 @@ Reference date: 2026-09-07
 
 ## Current state
 
-**Base-first + exact-state-first plan adopted.** The project follows the DeepKK philosophy in two stages:
+DeepPot NLH Base v1 remains on the **base-first / exact-state-first** path:
 
-`mathematical base strategy -> operational base runtime -> only then opponent exploitation`
+`mathematical base strategy -> operational OpenHoldem runtime -> only then DeepKK-style exploitation`
 
-The exploit/tracker work remains intentionally deferred until the base solver and runtime are validated.
+No strategically lossy card abstraction is planned for Base v1. Exact global suit isomorphism is the only card-state reduction.
 
-The production research path now explicitly avoids strategically lossy card abstraction unless the exact route later fails a measured computational-feasibility gate.
+Current phase summary:
 
-## Live mechanics now confirmed
+- **P0 mechanics:** complete;
+- **P0 economy:** pending final freeze;
+- **P1 game kernel:** PASS;
+- **P2 exact state/equity representation:** PASS;
+- **P3 exact solver engine + throughput gate:** PASS;
+- **P4 HU:** PASS and closed;
+- **P4C original multiway CFR/FP:** BLOCKED;
+- **P4D FP-PED:** BLOCKED;
+- **P4E projected Nash extragradient:** N=3 finite viability gate RUNNING;
+- P5+ waits for P0/P4 closure.
 
-- Pot Fold tables support up to **8 seats**.
-- Dynamic player counts matter because tables are frequently not full.
-- All dealt players pay equal ante; there are no practical SB/BB forced-blind payments.
-- The **BTN is last to act** on the flop decision street.
-- If every player before the last survivor folds, the survivor wins immediately without paying the fixed STAY contribution.
-- Uncontested pots are still raked.
+## Mechanics confirmed
 
-A true-HU observation with ante 12 each produced a BTN net profit of +11.52 after the other player folded. Interpreted as stack profit after the BTN's own ante, this exactly matches a 2% deduction from the 24 gross pot: 24 - 0.48 - 12 = 11.52.
+- Pot Fold supports 2 through 8 dealt players in the DeepPot model/live observations;
+- every dealt player pays the same ante;
+- preflop is skipped;
+- action is one flop decision street;
+- legal strategic actions are FOLD or fixed POT/STAY;
+- BTN acts last;
+- when all earlier players fold, the last survivor wins without paying STAY;
+- after flop action leaves 2+ players, turn and river are automatic;
+- uncontested pots are also subject to deduction/rake.
 
-Two other reported gross-to-award observations do not fit a single uncapped 2% rule:
+## P0 economy
 
-- 84 -> 81.12: deduction 2.88 = 3.428571%
-- 45 -> 43.38: deduction 1.62 = 3.600000%
+The official KKPoker Pot Fold rules page does not publish a Pot-Fold-specific rake schedule. DeepPot therefore keeps economy separate from strategy mechanics and does not silently inherit the normal NLH table.
 
-Therefore the economy remains parameterized and the official rake schedule is **not frozen**.
+Three user-reported payout observations are currently consistent with a **2% deduction from gross terminal pot** once the displayed winner amount is interpreted as net profit rather than gross pot award. The true-HU ante-12 uncontested observation is directly consistent with 2%:
 
-## Engineering progress
+`gross 24 -> deduction 0.48 -> winner net profit 11.52 after own ante 12`.
 
-### P1 game kernel — core complete
+The remaining uncertainty is primarily whether Pot Fold has a cap or stake/profile-dependent variation. Until frozen, calibration uses the explicit provisional profile `provisional-2pct` and P5 all-flop production solving does not start.
 
-Implemented:
+Finite evidence ledger: `docs/P0_ECONOMY_EVIDENCE.md`.
 
-- 2–8 player Pot Fold state machine;
-- neutral action order A0/A1/.../BTN, BTN last;
+## P1 — game kernel: PASS
+
+Implemented and regression-tested:
+
+- exact 2–8 player binary public tree;
 - fixed STAY cost = initial ante pot;
-- automatic uncontested termination;
-- zero-STAY BTN win when all previous players fold;
-- showdown terminal state;
-- nominal rake/cap model;
-- per-player contributions, payouts, tie splitting and terminal utilities.
+- uncontested/showdown terminals;
+- contributions, payouts, ties and utilities;
+- parameterized rake/cap.
 
-### P2 canonicalization/equity — prototype complete
+## P2 — exact state/equity representation: PASS
 
-Implemented:
+Frozen lossless state model:
 
-- NLH card/deck model;
-- flop canonicalization under all 24 suit permutations;
-- flop+hole canonicalization under suit isomorphism;
-- regression proving **1,755** canonical NLH flop classes;
-- exact 5-card and 7-card evaluator;
-- exact HU flop equity over all 990 turn-river runouts for two known hands;
-- multiway showdown evaluation for known hole cards and final board.
+- 1,755 canonical NLH flops under global suit isomorphism;
+- **1,286,792** exact `(canonical flop, hero hole)` states;
+- exact per-flop dense hole-state indices;
+- public decision scenarios `2^N - 2`;
+- exact dense infoset keys;
+- direct exact 7-card evaluator with differential regression;
+- exact HU runout equity API;
+- multiway showdown evaluator.
 
-### Exact state-space audit — completed
+The old `1,755 x 169` shorthand is not production-safe because visible-flop suit relationships make nominally identical preflop classes strategically different.
 
-The initial shorthand `1,755 flops x 169 hands` is **not fully exact** because the 169 preflop classes merge suit relationships that become strategically different once a flop is visible.
+## P3 — exact solver/throughput: PASS
 
-Example: on `Qh 7h 2c`, `AhKh` and `AcKc` are both AKs, but only the first has the nut-heart flush draw.
+The exact fixed-flop chance-sampled CFR+ engine, consensus export, checkpoint/resume, all-flop queue, hashing/manifests and multiprocessing path are implemented.
 
-The exact lossless count, quotienting only true global suit relabeling, was derived with Burnside's lemma and regression-tested:
+Frozen post-optimization throughput on `Ah 7d 2c`:
 
-- raw partitioned `(flop, hero hole)` states: **25,989,600**;
-- canonical flops: **1,755**;
-- exact suit-isomorphic flop+hole states: **1,286,792**;
-- `1,755 x 169`: 296,595;
-- exact state space is only **4.33855x** larger than the 169-class approximation;
-- average exact hole states per canonical flop: **733.215**.
+| N | fixed iterations | iterations/s | infoset-visits/s |
+|---:|---:|---:|---:|
+| 2 | 50,000 | 11,806 | 23,612 |
+| 3 | 20,000 | 5,557 | 33,342 |
+| 4 | 10,000 | 2,659 | 37,224 |
+| 5 | 5,000 | 1,314 | 39,429 |
+| 6 | 2,000 | 638 | 39,536 |
+| 7 | 1,000 | 309 | 38,940 |
+| 8 | 500 | 146.6 | 37,243 |
 
-Exact public decision-scenario counts are `2^N - 2`:
+No further throughput ladder is planned.
 
-- 2p: 2 scenarios -> 2,573,584 dense exact infosets over all flops;
-- 3p: 6 -> 7,720,752;
-- 4p: 14 -> 18,015,088;
-- 5p: 30 -> 38,603,760;
-- 6p: 62 -> 79,781,104;
-- 7p: 126 -> 162,135,792;
-- 8p: 254 -> 326,845,168.
+## P4 — finite strategy-quality calibration
 
-These are dense global counts, not RAM requirements. Production solving can process one canonical flop at a time and export/checkpoint before moving to the next.
+### HU: PASS / CLOSED
 
-See `docs/EXACT_STATE_SPACE.md` and `src/deeppot/state_space.py`.
+All four frozen HU representative textures pass the independent split-sample unilateral-response gate after the single allowed 12-round damped bilateral response refinement.
 
-### P3 base solver — first prototype implemented
+Provisional-economy HU production method:
 
-Implemented a fixed-flop **chance-sampled CFR** engine:
+`2M x 3 CFR consensus -> 12 x 100k damped-response refinement`.
 
-- samples private cards plus turn/river once per iteration;
-- traverses the complete binary FOLD/STAY tree for that sampled deal;
-- uses information sets containing only public flop/history + actor's own hole cards;
-- supports 2 through 8 players;
-- supports CFR+ regret clipping and linear averaging;
-- has deterministic seed behavior and smoke tests.
+### P4C original multiway CFR/FP: BLOCKED
 
-A reproducible pilot runner exports source hash, run manifest, per-seed policies, visit coverage, pairwise policy differences and consensus stability metrics.
+All 12 raw N=3..8 representative cases failed the unchanged per-seat unilateral-gain upper threshold of 0.03 ante. The one allowed 32-round fictitious-response correction was applied to N=3..6 and all eight corrected cases still failed. No more P4C tuning is allowed.
 
-## First P4 stability pilot — unstable, but not evidence for abstraction
+### P4D FP-PED: BLOCKED
 
-Pilot: HU, flop `Ah 7d 2c`, 2% working rake, 10,000 iterations per seed, seeds 1/2/3.
+Frozen N=3 viability results:
 
-Coverage was nearly complete: 2,350 of 2,352 infosets were shared across all seeds (99.915%). But each exact infoset had only **8 median visits**.
+| flop | seat 0 upper | seat 1 upper | seat 2 upper | result |
+|---|---:|---:|---:|---|
+| `Ah 7h 2h` | 0.005327 | 0.011187 | 0.015921 | PASS |
+| `Ah 7d 2c` | 0.020422 | 0.018494 | **0.039123** | FAIL |
 
-Cross-seed results:
+The rainbow failure blocks P4D. No extra rounds, samples, altered radius or checkpoint selection are allowed.
 
-- mean absolute difference in P(STAY): about 0.214–0.217;
-- P95 absolute difference: about 0.579–0.581;
-- maximum difference: about 0.98;
-- pairwise greedy-action agreement: only about 71–72%;
-- all-seed greedy agreement: 57.62%;
-- stability classification: **UNSTABLE**.
+### P4E projected Nash extragradient: RUNNING
 
-The correct interpretation is now: **10k sampled deals was a smoke test with far too few visits per exact infoset.** It does not demonstrate that the exact representation is computationally infeasible.
+P4E changes the mathematical target. For each exact infoset it estimates the player's own conditional action advantage:
 
-## Solver direction after exact-state audit
+`A(I) = E[u(STAY) - u(FOLD) | I, opponents]`
 
-The next design step is **make exact solving fast enough before considering any strategically lossy abstraction**.
+and applies an independent predictor/corrector projected extragradient to the binary Nash complementarity conditions.
 
-Priority order:
+Frozen N=3 viability protocol:
 
-1. replace slow Python/string-key hot paths with dense integer-indexed structures where possible;
-2. benchmark a much faster evaluator/terminal-payoff path;
-3. batch/vectorize sampled deals and updates, borrowing from the DeepKK generator architecture;
-4. add multiprocessing by canonical flop;
-5. add checkpoint/resume and per-flop scheduling;
-6. test variance-reduction / improved CFR sampling methods that keep exact infosets;
-7. scale HU pilots through increasing visit targets and measure convergence vs wall time;
-8. add independent HU best-response / response validation;
-9. only after measured throughput, estimate total cost for 2p through 8p.
+- rainbow `Ah 7d 2c` and monotone `Ah 7h 2h` only;
+- CFR warm start `250k x 3`;
+- 64 extragradient rounds;
+- 50k predictor + 50k independent corrector samples/round;
+- radius `0.10 / sqrt(round)`;
+- original 250k-learn + 250k-holdout response validator;
+- every seat upper 95% <= 0.03 ante;
+- no early stopping/tuning/checkpoint selection.
 
-A lossy equity/potential abstraction is now a **fallback**, not the planned production representation.
+The N=4..8 promotion schedule was predeclared **before the N=3 results were known** in `docs/P4E_N4_N8_SCALING_SCHEDULE.md`. Its workflow is prepared but deliberately gated by `.github/p4e_n4_n8.trigger`, so it cannot run unless both N=3 cases pass first.
 
-## Precision terminology
+Current N=3 workflow run: `34160799208`.
 
-DeepPot aims for:
+## Next branch
 
-- **100% state fidelity:** no strategically distinct flop/hole state is merged. This is achievable with the exact suit-isomorphic representation;
-- numerical equilibrium/response accuracy pushed to explicit convergence tolerances. Finite iterative computation cannot literally provide infinite-precision equilibrium, so cross-seed stability, regret/response metrics and EV error bounds remain mandatory.
+If both P4E N=3 cases PASS, create the predeclared trigger and execute the ten N=4..8 rainbow/monotone promotion cases exactly once. If either fails, mark P4E BLOCKED and change solver method rather than adding a parameter ladder.
 
-## Validation already performed
+P5 all-1,755-flop production solving begins only after both P0 economy and P4 calibration are closed.
 
-- existing combined unit suite was passing before the exact-state additions;
-- exact Burnside state-count regressions were added;
-- first 3-seed pilot is documented in `docs/PILOT_HU_A72R_10K_20260907.md`;
-- exact-state design is documented in `docs/EXACT_STATE_SPACE.md`.
+## Information useful from live Pot Fold
 
-## Next critical work
+For any clean payout observation, capture:
 
-1. Verify CI after the exact-state-count additions.
-2. Build an exact-state throughput benchmark for representative flop textures.
-3. Measure visits/second and memory/state for HU at 10k/50k/100k+ iterations.
-4. Replace the main identified hot paths before using Ryzen time at scale.
-5. Re-run cross-seed stability with materially higher visits per infoset.
-6. Add HU best-response/response validation before expanding to 3w+.
+`players dealt | ante | table/stake label | FOLD/STAY sequence | gross terminal pot | amount awarded | net stack change | separate fee/rake line | jackpot/other fee if present`
 
-## Information still useful later, but not blocking development
-
-For future observed hands, the most valuable record is:
-
-`players dealt | ante | FOLD/STAY sequence | gross terminal pot | amount awarded | any separate fee/rake line | total award vs net stack change | rakeback/EXP credit`
-
-No screenshots are required right now to continue base-solver development.
+The remaining P0 goal is to establish whether the apparent 2% gross-pot deduction has a cap or profile variation.
