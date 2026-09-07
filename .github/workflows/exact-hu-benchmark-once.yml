@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/exact-hu-benchmark-once.yml'
 
+# evaluator: direct-seven-card-v1-fixed
 jobs:
   benchmark:
     runs-on: ubuntu-latest
@@ -27,5 +28,5 @@ jobs:
             --out exact_hu_benchmark_v2.json
       - uses: actions/upload-artifact@v4
         with:
-          name: exact-hu-benchmark-v2
+          name: exact-hu-benchmark-v2-fixed
           path: exact_hu_benchmark_v2.json
