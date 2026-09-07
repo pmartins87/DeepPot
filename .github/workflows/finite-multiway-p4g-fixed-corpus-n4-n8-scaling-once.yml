@@ -1,0 +1,217 @@
+name: Finite Multiway P4G Fixed-Corpus N4-N8 Scaling Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/p4g_n4_n8.trigger'
+
+jobs:
+  p4g-scale:
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        include:
+          - id: n4_rainbow
+            players: 4
+            flop: 'Ah 7d 2c'
+            iterations: 250000
+            opt_samples: 50000
+            response_samples: 250000
+          - id: n4_monotone
+            players: 4
+            flop: 'Ah 7h 2h'
+            iterations: 250000
+            opt_samples: 50000
+            response_samples: 250000
+          - id: n5_rainbow
+            players: 5
+            flop: 'Ah 7d 2c'
+            iterations: 100000
+            opt_samples: 40000
+            response_samples: 100000
+          - id: n5_monotone
+            players: 5
+            flop: 'Ah 7h 2h'
+            iterations: 100000
+            opt_samples: 40000
+            response_samples: 100000
+          - id: n6_rainbow
+            players: 6
+            flop: 'Ah 7d 2c'
+            iterations: 100000
+            opt_samples: 30000
+            response_samples: 100000
+          - id: n6_monotone
+            players: 6
+            flop: 'Ah 7h 2h'
+            iterations: 100000
+            opt_samples: 30000
+            response_samples: 100000
+          - id: n7_rainbow
+            players: 7
+            flop: 'Ah 7d 2c'
+            iterations: 100000
+            opt_samples: 20000
+            response_samples: 100000
+          - id: n7_monotone
+            players: 7
+            flop: 'Ah 7h 2h'
+            iterations: 100000
+            opt_samples: 20000
+            response_samples: 100000
+          - id: n8_rainbow
+            players: 8
+            flop: 'Ah 7d 2c'
+            iterations: 100000
+            opt_samples: 10000
+            response_samples: 100000
+          - id: n8_monotone
+            players: 8
+            flop: 'Ah 7h 2h'
+            iterations: 100000
+            opt_samples: 10000
+            response_samples: 100000
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build frozen exact CFR warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --players '${{ matrix.players }}' \
+            --flop '${{ matrix.flop }}' \
+            --iterations '${{ matrix.iterations }}' \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/${{ matrix.id }}
+
+      - name: Build frozen FP warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_refine \
+            --players '${{ matrix.players }}' \
+            --policy runs/${{ matrix.id }}/policy_consensus.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --samples-per-round '${{ matrix.opt_samples }}' \
+            --prior-weight 4 \
+            --seed-base 9402026 \
+            --out-policy runs/${{ matrix.id }}/policy_fp_warm.csv \
+            --out-audit runs/${{ matrix.id }}/fp_warm_audit.json
+
+      - name: Build frozen PED warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_ped \
+            --players '${{ matrix.players }}' \
+            --policy runs/${{ matrix.id }}/policy_fp_warm.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --br-samples-per-round '${{ matrix.opt_samples }}' \
+            --gradient-samples-per-round '${{ matrix.opt_samples }}' \
+            --initial-max-coordinate-step 0.10 \
+            --seed-base 9502026 \
+            --out-policy runs/${{ matrix.id }}/policy_ped_warm.csv \
+            --out-audit runs/${{ matrix.id }}/ped_warm_audit.json
+
+      - name: Run frozen P4G deterministic fixed-corpus mirror-prox
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_fixed_corpus \
+            --players '${{ matrix.players }}' \
+            --policy runs/${{ matrix.id }}/policy_ped_warm.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --corpus-samples '${{ matrix.opt_samples }}' \
+            --corpus-seed 9802026 \
+            --initial-max-coordinate-radius 0.05 \
+            --smoothmax-beta 100 \
+            --out-policy runs/${{ matrix.id }}/policy_p4g.csv \
+            --out-audit runs/${{ matrix.id }}/p4g_audit.json
+
+      - name: Run original independent response gate
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_response \
+            --players '${{ matrix.players }}' \
+            --policy runs/${{ matrix.id }}/policy_p4g.csv \
+            --flop '${{ matrix.flop }}' \
+            --learn-samples '${{ matrix.response_samples }}' \
+            --eval-samples '${{ matrix.response_samples }}' \
+            --seed 9302026 \
+            --rake-pct 0.02 \
+            --out runs/${{ matrix.id }}/p4g_response.json
+
+      - name: Apply frozen P4G scaling threshold
+        env:
+          CASE_ID: ${{ matrix.id }}
+          PLAYERS: ${{ matrix.players }}
+          FLOP: ${{ matrix.flop }}
+          ITERATIONS: ${{ matrix.iterations }}
+          OPT_SAMPLES: ${{ matrix.opt_samples }}
+          RESPONSE_SAMPLES: ${{ matrix.response_samples }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('runs') / os.environ['CASE_ID']
+          summary = json.loads((root / 'summary.json').read_text())
+          response = json.loads((root / 'p4g_response.json').read_text())
+          audit = json.loads((root / 'p4g_audit.json').read_text())
+
+          coverage = summary['consensus']['shared_all_coverage']
+          seat_uppers = [x['ci95_high'] for x in response['unilateral_gain']]
+          negative_gap_stages = 0
+          for round_ in audit['round_audit']:
+              negative_gap_stages += int(round_['predictor']['negative_gap_count'] > 0)
+              negative_gap_stages += int(round_['corrector']['negative_gap_count'] > 0)
+
+          result = {
+              'phase': 'P4G_N4_N8_FIXED_CORPUS_SCALING',
+              'case': os.environ['CASE_ID'],
+              'players': int(os.environ['PLAYERS']),
+              'flop': os.environ['FLOP'],
+              'coverage': coverage,
+              'seat_unilateral_gain_ci95_high': seat_uppers,
+              'threshold': 0.03,
+              'cfr_iterations_per_seed': int(os.environ['ITERATIONS']),
+              'optimization_samples': int(os.environ['OPT_SAMPLES']),
+              'response_learn_samples': int(os.environ['RESPONSE_SAMPLES']),
+              'response_holdout_samples': int(os.environ['RESPONSE_SAMPLES']),
+              'p4g_rounds': 32,
+              'p4g_corpus_seed': 9802026,
+              'p4g_corpus_sha256': audit['corpus_sha256'],
+              'smoothmax_beta': 100.0,
+              'radius_schedule': '0.05/sqrt(round)',
+              'negative_gap_round_stages': negative_gap_stages,
+          }
+          result['pass'] = coverage == 1.0 and all(x <= 0.03 for x in seat_uppers)
+          (root / 'p4g_scale_gate.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          if not result['pass']:
+              raise SystemExit(1)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p4g-scale-${{ matrix.id }}
+          path: runs/${{ matrix.id }}/
