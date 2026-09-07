@@ -33,8 +33,9 @@ def _straight_high(ranks: Sequence[int]) -> int | None:
 def _straight_high_mask(mask: int) -> int | None:
     """Fast straight-high lookup from a 13-bit rank mask (deuce bit 0, ace bit 12)."""
 
-    # Standard broadway through six-high straights.
-    for high in range(14, 5 - 1, -1):
+    # Standard broadway through six-high straights. Five-high is the wheel and
+    # is handled separately because its low rank is ace-as-one, not rank 1.
+    for high in range(14, 5, -1):
         low = high - 4
         needed = 0
         for rank in range(low, high + 1):
