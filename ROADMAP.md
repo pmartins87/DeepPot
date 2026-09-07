@@ -4,6 +4,8 @@
 
 Build the **mathematical base strategy first**, following the DeepKK pattern. Opponent tracking and exploitation remain deliberately deferred until the base solver, validation, policy format and runtime are solid.
 
+Second principle: **exact-state first**. DeepPot will preserve every strategically distinct flop+hole state and collapse only true suit isomorphisms. Lossy equity/potential/card bucketing is a fallback only if the optimized exact path later fails a measured computational-feasibility gate.
+
 ## P0 — Rules and economy gate
 
 Status: **IN PROGRESS, no longer blocking engineering**
@@ -38,25 +40,33 @@ Status: **CORE COMPLETE**
 - [ ] Separate rakeback/PVI reward model.
 - [x] Unit tests for core terminal geometries.
 
-## P2 — State canonicalization and equity engine
+## P2 — Exact state canonicalization and equity engine
 
-Status: **PROTOTYPE COMPLETE / OPTIMIZATION PENDING**
+Status: **EXACT REPRESENTATION PROVEN / PERFORMANCE OPTIMIZATION PENDING**
 
 - [x] Canonicalize flop + hole cards under all 24 suit permutations.
 - [x] Enumerate and regression-test the 1,755 standard NLH flop isomorphism classes.
+- [x] Prove exact flop+hole state count with Burnside's lemma: **1,286,792** states modulo only global suit relabeling.
+- [x] Document why `1,755 x 169` is not exact after the flop is visible.
+- [x] Regression-test exact state-space and public-scenario counts.
 - [x] Exact 5-card and 7-card evaluator.
 - [x] Exact cached-ready HU turn-river enumeration API (990 runouts for two known hands on a flop).
 - [x] Multiway showdown evaluator for known hands/runout.
 - [ ] Fast evaluator implementation suitable for production-scale solving.
-- [ ] Monte Carlo/equity fallback with deterministic seeds and confidence intervals.
+- [ ] Dense integer ID for every exact canonical flop+hole state.
+- [ ] Per-flop exact-state index tables.
 - [ ] Cache format with version/hash metadata.
 - [ ] Differential validation against an independent evaluator/library.
 
-## P3 — DeepPot base solver
+## P3 — DeepPot exact base solver
 
-Status: **CHANCE-SAMPLED CFR PROTOTYPE IMPLEMENTED**
+Status: **CHANCE-SAMPLED CFR PROTOTYPE IMPLEMENTED; OPTIMIZATION NEXT**
 
-The key structural difference from DeepKK is the state space: Pot Fold is **flop-conditioned**, not a 169 preflop-hand-class game.
+The production target is not a 169-class-per-flop approximation. It is:
+
+`exact canonical flop+hole state | exact player count | exact public FOLD/STAY history -> policy`
+
+Suit relabeling is exact symmetry, not strategic abstraction.
 
 - [x] Fixed-flop subgame solver architecture.
 - [x] Binary actions: STAY/POT and FOLD.
@@ -67,35 +77,53 @@ The key structural difference from DeepKK is the state space: Pot Fold is **flop
 - [x] CFR+ regret floor and linear strategy averaging prototype.
 - [x] Information-set keys expose only player count, actor/history, flop and actor hole cards.
 - [x] Deterministic-seed smoke tests, including 8-player execution.
+- [ ] Replace string-key dictionary hot path with dense integer-indexed node storage where possible.
+- [ ] Replace/accelerate terminal evaluator hot path.
+- [ ] Add batched/vectorized deal generation and updates analogous to DeepKK where mathematically valid.
 - [ ] Add production run configuration/manifest analogous to DeepKK.
 - [ ] Add multiprocessing by canonical flop.
-- [ ] Add checkpoint/resume.
-- [ ] Export immutable base policy + EV reference.
-- [ ] Evaluate exact-state storage versus strategically safe abstraction.
-- [ ] Boundary refinement for near-indifferent states.
+- [ ] Add checkpoint/resume and resumable per-flop work queue.
+- [ ] Add variance-reduction / alternative CFR sampling methods that preserve exact infosets.
+- [ ] Export immutable exact base policy + EV reference.
 - [ ] Decide whether production base solver remains CFR-family after validation of rake/multiplayer game-theory caveats.
+
+### Exact-state computational feasibility gate
+
+Before any lossy abstraction is allowed, measure the optimized exact path on representative flop textures and player counts.
+
+- [ ] Benchmark exact HU on low/medium/high canonical-hole-count flops.
+- [ ] Measure iterations/s, infoset-visits/s, terminal evaluations/s, peak RAM and policy bytes/state.
+- [ ] Run 10k -> 50k -> 100k -> larger cross-seed scaling on the same flop.
+- [ ] Estimate full 1,755-flop HU wall time from measured texture-weighted throughput.
+- [ ] Repeat staged estimates for 3w, 4w and upward only after HU passes.
+- [ ] If exact compute is expensive, optimize implementation before reducing state fidelity.
+- [ ] Lossy abstraction may be reconsidered only after this gate documents that exact-state solving is impractical within project resources.
 
 ## P4 — Solver validation
 
 Status: **NEXT CRITICAL GATE**
 
-- [ ] Cross-seed policy stability.
-- [ ] Mean/max positive regret.
-- [ ] Best-response exploitability estimate for HU.
+- [x] First 10k HU cross-seed pilot executed; result unstable because median exact-state visits were only ~8.
+- [ ] Higher-visit cross-seed policy stability on exact infosets.
+- [ ] Mean/max positive regret or the appropriate chosen-solver convergence metric.
+- [ ] Best-response/exploitability or equivalent response metric for HU.
 - [ ] Multiplayer response/robustness metrics for N>2.
-- [ ] EV confidence intervals.
-- [ ] Coverage/min-visits report per canonical state.
+- [ ] EV confidence/error intervals.
+- [ ] Coverage/min-visits report per exact canonical state.
 - [ ] Exact-vs-sampled equity regression tests.
 - [ ] Reproducible run manifest and SHA256 hashes.
-- [ ] Validate that path-dependent rake does not invalidate the chosen convergence target.
+- [ ] Validate the target-solution implications of path-dependent rake.
+- [ ] Validate the target-solution implications of multiplayer general-sum play before claiming equilibrium properties for N>2.
 
-## P5 — Operational base-policy format
+## P5 — Operational exact base-policy format
 
-- [ ] Define policy key: variant | players | scenario | canonical_flop | canonical_hole_state.
-- [ ] Compact lookup format suitable for OpenHoldem DLL runtime.
+- [ ] Define policy key: variant | players | scenario | canonical_flop_hole_id.
+- [ ] Compact per-flop/indexed lookup format suitable for OpenHoldem DLL runtime.
+- [ ] Quantify probability quantization error if policy probabilities are stored as uint8/uint16.
 - [ ] Preserve mathematical policy separately from operational policy.
 - [ ] Safe unknown-state fallback.
 - [ ] Version policy by complete economic configuration.
+- [ ] Do not merge strategically distinct states in the operational export.
 
 ## P6 — OpenHoldem base runtime
 
@@ -104,6 +132,7 @@ This is intentionally brought before exploitation. The first live DeepPot must b
 - [ ] Pot Fold tablemap/scraper validation.
 - [ ] Dynamic 2–8 player action-order mapping with BTN last.
 - [ ] Formula scenario detection.
+- [ ] Exact canonical flop+hole runtime key.
 - [ ] DLL/base-policy lookup.
 - [ ] Single decision symbol.
 - [ ] HIT/MISS/mismatch logs.
@@ -140,7 +169,7 @@ Reuse the proven DeepKK structure, but reconstruct flop decisions instead of pre
 - [ ] PlayerAliases.
 - [ ] AutoAliasCandidates.
 - [ ] Alias flattening.
-- [ ] OpponentStats by variant/player-count/scenario/flop abstraction.
+- [ ] OpponentStats by variant/player-count/scenario and an exact-state or separately validated statistical feature model.
 - [ ] PoolStats priors.
 - [ ] Shrinkage/confidence model.
 
@@ -163,5 +192,5 @@ Reuse the proven DeepKK structure, but reconstruct flop decisions instead of pre
 - [ ] PLO4 Pot Fold.
 - [ ] PLO5 Pot Fold.
 - [ ] Omaha exact-card-use evaluator.
-- [ ] New state abstraction/canonicalization.
+- [ ] Exact PLO state-space/canonicalization study before any abstraction decision.
 - [ ] Separate strategies and validation artifacts.
