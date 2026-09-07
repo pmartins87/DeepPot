@@ -1,0 +1,57 @@
+name: Exact HU A72r One Allowed Correction
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/exact-hu-a72r-correction-once.yml'
+
+jobs:
+  correction-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Rebuild exact A72r 2M x 3 consensus with corrected implementation
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --flop 'Ah 7d 2c' \
+            --iterations 2000000 \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/a72r_correction
+      - name: Apply the single finite response-directed solver correction
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.hu_refine \
+            --policy runs/a72r_correction/policy_consensus.csv \
+            --flop 'Ah 7d 2c' \
+            --rake-pct 0.02 \
+            --rounds 12 \
+            --samples-per-round 100000 \
+            --prior-weight 4 \
+            --seed-base 9202026 \
+            --out-policy runs/a72r_correction/policy_refined.csv \
+            --out-audit runs/a72r_correction/refinement_audit.json
+      - name: Rerun the same finite response gate once
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.hu_response \
+            --policy runs/a72r_correction/policy_refined.csv \
+            --flop 'Ah 7d 2c' \
+            --learn-samples 250000 \
+            --eval-samples 250000 \
+            --seed 9102026 \
+            --rake-pct 0.02 \
+            --out runs/a72r_correction/hu_response_after_correction.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-hu-a72r-one-correction
+          path: runs/a72r_correction/
