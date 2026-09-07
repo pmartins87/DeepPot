@@ -51,6 +51,8 @@ Economy closure:
 
 Finite evidence rule: use a Pot-Fold-specific official KKPoker schedule if one becomes available. Otherwise use **at most 12 clean live payout observations** chosen across relevant player-count/pot geometries. If those prove that more than one economy profile exists, Base v1 supports only the profile(s) actually identified; we do not keep collecting an unlimited sample.
 
+The three live payouts currently reported are mutually consistent with **2% of gross terminal pot** once 84/45 are interpreted consistently as pre-rake net wins rather than gross pots; see `docs/P0_ECONOMY_EVIDENCE.md`. Cap behavior is still unknown.
+
 Engineering may continue under the current provisional 2% model. **Final all-flop production solving waits for P0 PASS.**
 
 ---
@@ -137,7 +139,7 @@ The one fixed N=2..8 benchmark and the **single allowed implementation-optimizat
 
 # P4 — Finite solver-quality calibration
 
-Status: **IN PROGRESS — HU PASS / P4C BLOCKED / P4D RUNNING**
+Status: **IN PROGRESS — HU PASS / P4C BLOCKED / P4D BLOCKED / P4E RUNNING**
 
 ## P4A — HU A72r ladder: CLOSED
 
@@ -207,38 +209,44 @@ Because the single correction failed, **P4C is BLOCKED**. We do not add CFR iter
 
 The exact multiway response validator has additionally passed a differential N=2 comparison against the independent HU validator, supporting the validity of the measured multiway response gaps.
 
-## P4D — FP-PED method reset
+## P4D — FP-PED method reset: BLOCKED
+
+P4D replaced fictitious-response averaging as the final solver with exact-state sampled Projected Exploitability Descent (PED), using the fixed N=3 viability protocol recorded before results in `docs/P4D_FP_PED_METHOD_RESET.md`.
+
+The two frozen N=3 results were:
+
+| flop | seat 0 upper | seat 1 upper | seat 2 upper | gate |
+|---|---:|---:|---:|---|
+| `Ah 7h 2h` monotone | 0.005327 | 0.011187 | 0.015921 | PASS |
+| `Ah 7d 2c` rainbow | 0.020422 | 0.018494 | **0.039123** | FAIL |
+
+Coverage was 100% in both cases. Because the max-state rainbow case exceeded the unchanged 0.03 threshold, P4D is **BLOCKED**. We do not add PED rounds, alter the PED radius schedule, increase its samples, select an earlier checkpoint or relax the gate.
+
+## P4E — projected Nash extragradient method reset
 
 Status: **N=3 FINITE VIABILITY GATE RUNNING**
 
-The replacement method is exact-state FP-PED:
+P4E targets a different mathematical object from P4D. Instead of differentiating aggregate exploitability, it estimates for every exact infoset the player's own conditional action advantage
 
-`exact CFR consensus -> frozen FP warm start -> sampled Projected Exploitability Descent -> original independent response gate`
+`A(I) = E[u(STAY) - u(FOLD) | I, current opponents]`
 
-The PED implementation minimizes the aggregate unilateral-deviation objective. Because each Pot-Fold player acts at most once, sequence-form feasibility reduces to one independent FOLD/STAY simplex per exact infoset, so projection is exact local projection of `P(STAY)` to `[0,1]`.
+and applies a projected predictor/corrector extragradient directly to the binary Nash complementarity conditions.
 
-Implementation and differential gradient tests are complete. The finite protocol is frozen in `docs/P4D_FP_PED_METHOD_RESET.md` before seeing P4D gate results.
+Implementation is in `src/deeppot/multiway_extragradient.py`. Regression tests compare sampled root action advantages against direct exact child-value differences and verify projection/simplex invariants. CI passed before the viability workflow was launched.
 
-### Frozen N=3 viability cases
+The complete finite protocol was frozen before results in `docs/P4E_PROJECTED_EXTRAGRADIENT_METHOD_RESET.md`:
 
-Run exactly:
+- exactly N=3 rainbow `Ah 7d 2c` and monotone `Ah 7h 2h`;
+- same exact CFR warm start: 250k x 3 seeds;
+- exactly 64 extragradient rounds;
+- 50k independent predictor samples/round;
+- 50k independent corrector samples/round;
+- normalized projected coordinate radius `0.10 / sqrt(round)`;
+- original 250k-learn + 250k-holdout response gate;
+- unchanged PASS threshold: every seat 95% unilateral-gain upper <= 0.03 ante;
+- no early stopping, parameter tuning or checkpoint selection.
 
-- N=3 `Ah 7d 2c`;
-- N=3 `Ah 7h 2h`.
-
-For both:
-
-- CFR warm start: 250k x 3 seeds;
-- FP warm start: 32 x 50k, prior weight 4;
-- PED: 32 rounds;
-- each PED round: 50k BR-learning + 50k independent gradient samples;
-- projected normalized max-coordinate step: `0.10 / sqrt(round)`;
-- final response gate: 250k learn + 250k holdout;
-- PASS: coverage 100% and every seat 95% unilateral-gain upper <= 0.03 ante.
-
-No early stopping, tuning, checkpoint selection or threshold relaxation is allowed after seeing the result.
-
-If both N=3 cases PASS, promote the same method to N=4..8 with the pre-frozen sample scaling in `docs/P4D_FP_PED_METHOD_RESET.md`. If either N=3 case fails, P4D is BLOCKED and the solver method changes again rather than adding another test ladder.
+If both N=3 cases PASS, the method receives one predeclared N=4..8 scaling schedule and is then tested once on the already-defined rainbow/monotone representatives. If either N=3 case fails, P4E is BLOCKED and the method changes again; no P4E ladder is permitted.
 
 P4 ends only with one frozen production method/configuration for every player-count mode N=2..8.
 
