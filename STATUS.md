@@ -21,7 +21,8 @@ Current phase summary:
 - **P4C original multiway CFR/FP:** BLOCKED;
 - **P4D FP-PED:** BLOCKED;
 - **P4E projected Nash extragradient:** BLOCKED;
-- **P4F primal-dual worst-seat mirror-prox:** N=3 finite viability gate RUNNING;
+- **P4F primal-dual worst-seat mirror-prox:** BLOCKED;
+- **P4G deterministic fixed-corpus worst-seat mirror-prox:** N=3 finite viability gate PREPARED;
 - P5+ waits for P0/P4 closure.
 
 ## Mechanics confirmed
@@ -125,35 +126,40 @@ The frozen N=3 P4E gate completed with 100% coverage in both textures:
 | `Ah 7h 2h` | 0.009051 | 0.016615 | 0.016012 | PASS |
 | `Ah 7d 2c` | **0.036877** | 0.019004 | **0.033603** | FAIL |
 
-Because the rainbow case has two seats above 0.030000, P4E is blocked. The predeclared N=4..8 P4E workflow is **not triggered**. No P4E round/sample/radius/checkpoint tuning is allowed. Full result: `docs/P4E_RESULT.md`.
+Because the rainbow case has two seats above 0.030000, P4E is blocked. The predeclared N=4..8 P4E workflow was **not triggered**. Full result: `docs/P4E_RESULT.md`.
 
-### P4F primal-dual worst-seat mirror-prox: RUNNING
+### P4F primal-dual worst-seat mirror-prox: BLOCKED
 
-P4F changes the objective to match the release gate directly:
+The frozen N=3 P4F gate completed with 100% coverage in both textures:
 
-`min_policy max_seat [u_seat(BR_seat(policy_-seat), policy_-seat) - u_seat(policy)]`.
+| flop | seat 0 upper | seat 1 upper | seat 2 upper | result |
+|---|---:|---:|---:|---|
+| `Ah 7h 2h` | 0.004295 | 0.010866 | 0.015436 | PASS |
+| `Ah 7d 2c` | 0.015658 | 0.016334 | **0.039877** | FAIL |
 
-It maintains a dual probability simplex over seats. Seats with larger estimated unilateral deviation gaps receive greater dual weight; the policy step descends the dual-weighted seat-specific exploitability gradient. Predictor and corrector stages use independent BR-learning/gradient blocks.
+The rainbow failure blocks P4F, so no P4F N=4..8 scaling run is launched. Full result: `docs/P4F_RESULT.md`.
 
-The complete N=3 protocol was frozen before P4F results in `docs/P4F_PRIMAL_DUAL_WORST_SEAT_METHOD_RESET.md`:
+P4F also exposed an optimization-estimator mismatch: independently sampled BR-learning and gradient blocks frequently produced negative internal `seat_gaps`, and the final rainbow dual weights concentrated on seat 0 even though the untouched holdout found seat 2 to be the worst exploitable seat. This motivates an estimator reset rather than another P4F parameter ladder.
 
-- fixed final P4D policy as deterministic warm start (`CFR 250k x3 -> FP 32x50k -> PED 32x(50k BR + 50k gradient)`);
-- 32 primal-dual mirror-prox rounds;
-- each predictor stage: 50k BR learn + independent 50k gap/gradient;
-- each corrector stage: fresh 50k BR learn + independent 50k gap/gradient;
-- policy radius `0.05/sqrt(round)`;
-- dual radius `0.50/sqrt(round)`;
-- original response gate 250k learn + 250k holdout;
-- every seat upper 95% <= 0.03 ante;
-- no early stopping/tuning/checkpoint selection.
+### P4G deterministic fixed-corpus worst-seat mirror-prox: PREPARED
 
-Seat-specific gradient finite-difference tests and primal/dual simplex invariants passed CI before the viability workflow was launched.
+P4G is implemented in `src/deeppot/multiway_fixed_corpus.py` and its complete N=3 protocol was frozen before results in `docs/P4G_FIXED_CORPUS_METHOD_RESET.md`.
 
-Current P4F N=3 workflow run: `34161823920`.
+Core change:
+
+- generate one immutable 50,000-deal chance corpus per flop;
+- reuse that exact corpus for every BR, seat-gap and gradient estimate throughout optimization;
+- learn and evaluate each empirical BR on the same corpus, making empirical unilateral gain non-negative apart from numerical roundoff;
+- use softmax weights (`beta=100`) over current empirical seat gaps to target the worst seat directly;
+- apply deterministic predictor/corrector projected mirror-prox with radius `0.05/sqrt(round)` for exactly 32 rounds;
+- retain exact card states and no strategic abstraction;
+- keep the original 250k-learn + independent 250k-holdout response gate untouched.
+
+Regression tests cover fixed-corpus reproducibility/hash stability, same-corpus BR non-negative-gap behavior, smooth-worst-seat weights, deterministic replay and policy-simplex preservation. CI passed before the P4G viability trigger.
 
 ## Next branch
 
-If both P4F N=3 cases PASS, freeze the N=4..8 scaling schedule before seeing any N=4 result and execute the ten already-defined rainbow/monotone representative cases once. If either fails, mark P4F BLOCKED and change solver method rather than adding a P4F parameter ladder.
+Execute the frozen P4G N=3 rainbow/monotone viability gate exactly once. If both PASS, freeze the N=4..8 scaling schedule before observing any N=4 result. If either fails, mark P4G BLOCKED and change method rather than adding a P4G tuning ladder.
 
 P5 all-1,755-flop production solving begins only after both P0 economy and P4 calibration are closed.
 
