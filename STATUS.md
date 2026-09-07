@@ -4,11 +4,13 @@ Reference date: 2026-09-07
 
 ## Current state
 
-**Base-first plan adopted.** The project follows the DeepKK philosophy in two stages:
+**Base-first + exact-state-first plan adopted.** The project follows the DeepKK philosophy in two stages:
 
 `mathematical base strategy -> operational base runtime -> only then opponent exploitation`
 
-The exploit/tracker work is intentionally deferred until the base solver and runtime are validated.
+The exploit/tracker work remains intentionally deferred until the base solver and runtime are validated.
+
+The production research path now explicitly avoids strategically lossy card abstraction unless the exact route later fails a measured computational-feasibility gate.
 
 ## Live mechanics now confirmed
 
@@ -55,6 +57,35 @@ Implemented:
 - exact HU flop equity over all 990 turn-river runouts for two known hands;
 - multiway showdown evaluation for known hole cards and final board.
 
+### Exact state-space audit — completed
+
+The initial shorthand `1,755 flops x 169 hands` is **not fully exact** because the 169 preflop classes merge suit relationships that become strategically different once a flop is visible.
+
+Example: on `Qh 7h 2c`, `AhKh` and `AcKc` are both AKs, but only the first has the nut-heart flush draw.
+
+The exact lossless count, quotienting only true global suit relabeling, was derived with Burnside's lemma and regression-tested:
+
+- raw partitioned `(flop, hero hole)` states: **25,989,600**;
+- canonical flops: **1,755**;
+- exact suit-isomorphic flop+hole states: **1,286,792**;
+- `1,755 x 169`: 296,595;
+- exact state space is only **4.33855x** larger than the 169-class approximation;
+- average exact hole states per canonical flop: **733.215**.
+
+Exact public decision-scenario counts are `2^N - 2`:
+
+- 2p: 2 scenarios -> 2,573,584 dense exact infosets over all flops;
+- 3p: 6 -> 7,720,752;
+- 4p: 14 -> 18,015,088;
+- 5p: 30 -> 38,603,760;
+- 6p: 62 -> 79,781,104;
+- 7p: 126 -> 162,135,792;
+- 8p: 254 -> 326,845,168.
+
+These are dense global counts, not RAM requirements. Production solving can process one canonical flop at a time and export/checkpoint before moving to the next.
+
+See `docs/EXACT_STATE_SPACE.md` and `src/deeppot/state_space.py`.
+
 ### P3 base solver — first prototype implemented
 
 Implemented a fixed-flop **chance-sampled CFR** engine:
@@ -66,9 +97,9 @@ Implemented a fixed-flop **chance-sampled CFR** engine:
 - supports CFR+ regret clipping and linear averaging;
 - has deterministic seed behavior and smoke tests.
 
-A reproducible pilot runner now exports source hash, run manifest, per-seed policies, visit coverage, pairwise policy differences and consensus stability metrics.
+A reproducible pilot runner exports source hash, run manifest, per-seed policies, visit coverage, pairwise policy differences and consensus stability metrics.
 
-## First P4 stability pilot — FAILED, usefully
+## First P4 stability pilot — unstable, but not evidence for abstraction
 
 Pilot: HU, flop `Ah 7d 2c`, 2% working rake, 10,000 iterations per seed, seeds 1/2/3.
 
@@ -83,35 +114,48 @@ Cross-seed results:
 - all-seed greedy agreement: 57.62%;
 - stability classification: **UNSTABLE**.
 
-This is not a failure of the project. It is a gate doing its job: exact flop+hole infosets with shallow chance sampling are too sparse for a cheap all-flop run. We will not waste Ryzen time scaling this naive configuration to all 1,755 flops.
+The correct interpretation is now: **10k sampled deals was a smoke test with far too few visits per exact infoset.** It does not demonstrate that the exact representation is computationally infeasible.
 
-## Solver direction after the pilot
+## Solver direction after exact-state audit
 
-The next design step is **validated card abstraction + variance reduction**, not brute-force scaling.
+The next design step is **make exact solving fast enough before considering any strategically lossy abstraction**.
 
-Research reviewed on poker solvers supports suit-isomorphic card abstraction followed by equity/potential-aware bucketing. This is especially attractive in Pot Fold because turn and river contain chance only—there are no later strategic actions—so the future showdown-strength distribution is directly relevant to the only decision street.
+Priority order:
 
-DeepPot will evaluate a hierarchy rather than commit blindly to one bucket count:
+1. replace slow Python/string-key hot paths with dense integer-indexed structures where possible;
+2. benchmark a much faster evaluator/terminal-payoff path;
+3. batch/vectorize sampled deals and updates, borrowing from the DeepKK generator architecture;
+4. add multiprocessing by canonical flop;
+5. add checkpoint/resume and per-flop scheduling;
+6. test variance-reduction / improved CFR sampling methods that keep exact infosets;
+7. scale HU pilots through increasing visit targets and measure convergence vs wall time;
+8. add independent HU best-response / response validation;
+9. only after measured throughput, estimate total cost for 2p through 8p.
 
-1. exact suit-isomorphic state as truth/reference on small pilots;
-2. per-flop equity/potential-aware buckets;
-3. multiple bucket resolutions (coarse -> medium -> fine);
-4. boundary refinement for buckets/states near action indifference;
-5. reject any abstraction that materially changes best action or EV on validation samples.
+A lossy equity/potential abstraction is now a **fallback**, not the planned production representation.
+
+## Precision terminology
+
+DeepPot aims for:
+
+- **100% state fidelity:** no strategically distinct flop/hole state is merged. This is achievable with the exact suit-isomorphic representation;
+- numerical equilibrium/response accuracy pushed to explicit convergence tolerances. Finite iterative computation cannot literally provide infinite-precision equilibrium, so cross-seed stability, regret/response metrics and EV error bounds remain mandatory.
 
 ## Validation already performed
 
-- local combined suite before publication: 22 tests passed after adding stability auditing;
-- GitHub CI on the current code path is passing;
-- first 3-seed pilot is documented in `docs/PILOT_HU_A72R_10K_20260907.md`.
+- existing combined unit suite was passing before the exact-state additions;
+- exact Burnside state-count regressions were added;
+- first 3-seed pilot is documented in `docs/PILOT_HU_A72R_10K_20260907.md`;
+- exact-state design is documented in `docs/EXACT_STATE_SPACE.md`.
 
 ## Next critical work
 
-1. Implement potential-aware/equity-distribution feature extraction for a fixed flop.
-2. Implement deterministic clustering/bucketing without losing suit/blocker relationships silently.
-3. Re-run the A72r HU pilot at several bucket resolutions and compare cross-seed stability.
-4. Add an independent HU best-response/exploitability validator.
-5. Only then choose the production abstraction and scale across the 1,755 canonical flops.
+1. Verify CI after the exact-state-count additions.
+2. Build an exact-state throughput benchmark for representative flop textures.
+3. Measure visits/second and memory/state for HU at 10k/50k/100k+ iterations.
+4. Replace the main identified hot paths before using Ryzen time at scale.
+5. Re-run cross-seed stability with materially higher visits per infoset.
+6. Add HU best-response/response validation before expanding to 3w+.
 
 ## Information still useful later, but not blocking development
 
