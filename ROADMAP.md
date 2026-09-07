@@ -94,9 +94,9 @@ The old shorthand `1,755 x 169` is not used in production because it merges stra
 
 # P3 — Exact solver engine and throughput gate
 
-Status: **IN PROGRESS**
+Status: **PASS**
 
-Already implemented:
+Implemented and frozen for the Base-v1 path:
 
 - [x] fixed-flop exact-state chance-sampled CFR+ candidate;
 - [x] linear average strategy;
@@ -104,39 +104,40 @@ Already implemented:
 - [x] dense integer infoset keys;
 - [x] precomputed raw-hole -> exact-state map;
 - [x] direct exact terminal evaluator;
+- [x] evaluate each player's final rank once per sampled deal and reuse it across terminal branches;
 - [x] reproducible manifests and seed policies;
 - [x] cross-seed exact consensus-policy export;
-- [x] multiprocessing across independent seeds for pilots.
+- [x] multiprocessing across independent seeds for pilots;
+- [x] checkpoint/resume per canonical flop;
+- [x] resumable all-flop work queue;
+- [x] multiprocessing by canonical flop for the Ryzen 9;
+- [x] per-shard policy SHA256 plus source/config/economy hashes;
+- [x] production manifest with atomic progress updates;
+- [x] exact-coverage enforcement before shard publication.
 
-Remaining production engineering:
+Compact node storage was **not required** by the fixed P3 gate and is therefore not a new prerequisite.
 
-- [ ] checkpoint/resume per canonical flop;
-- [ ] resumable all-flop work queue;
-- [ ] multiprocessing by canonical flop for the Ryzen 9;
-- [ ] compact node storage if the N=5–8 benchmark shows RAM/throughput requires it;
-- [ ] production manifest with source/economy/config hashes.
+### Finite throughput gate — CLOSED
 
-### One finite throughput benchmark
+The one fixed N=2..8 benchmark and the **single allowed implementation-optimization rerun** were completed on `Ah 7d 2c`. Post-optimization throughput:
 
-Run exactly one representative throughput benchmark per player count before the all-flop solve:
+| N | fixed iterations | iterations/s | infoset-visits/s |
+|---:|---:|---:|---:|
+| 2 | 50,000 | 11,806 | 23,612 |
+| 3 | 20,000 | 5,557 | 33,342 |
+| 4 | 10,000 | 2,659 | 37,224 |
+| 5 | 5,000 | 1,314 | 39,429 |
+| 6 | 2,000 | 638 | 39,536 |
+| 7 | 1,000 | 309 | 38,940 |
+| 8 | 500 | 146.6 | 37,243 |
 
-- N=2: 50k sampled deals;
-- N=3: 20k;
-- N=4: 10k;
-- N=5: 5k;
-- N=6: 2k;
-- N=7: 1k;
-- N=8: 500.
-
-Use the max-state rainbow flop `Ah 7d 2c`. The purpose is runtime/RAM projection only, not strategy validation.
-
-If projected production runtime or RAM is unacceptable, perform **one implementation optimization pass** and repeat this same benchmark once. No additional benchmark ladder is allowed.
+**No third throughput benchmark is allowed.**
 
 ---
 
 # P4 — Finite solver-quality calibration
 
-Status: **IN PROGRESS**
+Status: **IN PROGRESS — HU PASS / MULTIWAY NEXT**
 
 ## P4A — HU A72r ladder: CLOSED
 
@@ -156,51 +157,69 @@ At 2M x 3:
 - all-three greedy agreement 92.56%;
 - pairwise mean absolute P(STAY) difference ~0.037–0.038.
 
-**No 5M/10M/etc A72r seed ladder will be added.** The next metric is unilateral response gain.
+**No 5M/10M/etc A72r seed ladder will be added.**
 
-## P4B — HU response gate
+## P4B — HU response gate: PASS
 
-- [x] implement split-sample unilateral best-response validator with independent holdout and 95% CI;
-- [ ] validate the 2M x 3 consensus policy on A72r using exactly **250k learn + 250k holdout samples**;
-- [ ] run the same 2M x 3 + response gate on exactly three additional representative flops:
-  - `Ah 7h 2c` — two-tone;
-  - `Ah 7h 2h` — monotone;
-  - `Ah Ad 2c` — paired.
+Implemented a split-sample unilateral-best-response validator with an independent holdout and 95% CI. Frozen gate:
 
-HU PASS criteria for each representative flop:
-
-- exact infoset coverage = 100%;
+- coverage = 100%;
 - pairwise greedy agreement >= 90%;
-- player-0 unilateral gain 95% upper bound <= **0.02 ante**;
-- player-1 unilateral gain 95% upper bound <= **0.02 ante**;
-- total response/NashConv gain 95% upper bound <= **0.03 ante**.
+- player-0 unilateral gain 95% upper <= **0.02 ante**;
+- player-1 unilateral gain 95% upper <= **0.02 ante**;
+- total/NashConv gain 95% upper <= **0.03 ante**.
 
-If one or more flops fail, make **one solver-method correction** targeted at response quality and rerun only the failing representative flop(s) once. If still failing, P4 is BLOCKED; do not add another iteration ladder.
+The raw 2M x 3 CFR consensus did not pass every response threshold. The roadmap's **single allowed solver-method correction** was therefore used: 12 fixed damped bilateral response-refinement rounds, 100k chance samples/round, prior weight 4, deterministic schedule, no card abstraction. The same 250k-learn + 250k-holdout gate was then rerun exactly once.
+
+All four frozen representative HU textures PASS after that one correction:
+
+| flop | texture | min pairwise greedy | P0 BR 95% upper | P1 BR 95% upper | total 95% upper |
+|---|---|---:|---:|---:|---:|
+| `Ah 7d 2c` | rainbow | >= 0.947 | 0.009384 | 0.016132 | 0.024312 |
+| `Ah 7h 2c` | two-tone | 0.967406 | 0.008217 | 0.010676 | 0.017796 |
+| `Ah 7h 2h` | monotone | 0.984012 | 0.007234 | 0.004585 | 0.011112 |
+| `Ah Ad 2c` | paired | 0.944220 | 0.008125 | 0.012350 | 0.019316 |
+
+The monotone raw result exceeded the frozen total threshold by only ~0.000009 ante; **the threshold was not relaxed**. It received the same one permitted correction as the other failing raw cases.
+
+**HU calibration is now closed.** The production HU method is `2M x 3 CFR consensus -> fixed 12 x 100k damped-response refinement` for the provisional economy profile, subject only to P0 economy freezing before P5.
 
 ## P4C — Multiway representative gate
 
-After HU PASS, validate N=3..8 on exactly two representative textures each:
+Status: **READY TO RUN**
+
+Validate N=3..8 on exactly two representative textures each:
 
 - `Ah 7d 2c` — max-state rainbow;
 - `Ah 7h 2h` — low-state monotone.
 
-For each N:
+The exact public-tree split-sample unilateral-response validator for N=3..8 is implemented and regression-tested. It integrates the complete FOLD/STAY public tree for each sampled chance deal and preserves exact flop-relative hole states.
 
-- [ ] train the fixed production candidate budget selected from P3/P4A calibration;
-- [ ] require 100% intended exact-state coverage for the published policy;
-- [ ] run one finite unilateral-response/robustness holdout audit per seat;
-- [ ] record EV and response gain with confidence intervals.
+### Frozen candidate budgets
 
-Multiway response sample budget is fixed at:
+These are the only initial multiway candidate budgets:
 
-- N=3–4: 250k learn + 250k holdout;
-- N=5–8: 100k learn + 100k holdout.
+| N | solver budget per representative flop | response learn | response holdout |
+|---:|---:|---:|---:|
+| 3 | 250k x 3 seeds | 250k | 250k |
+| 4 | 250k x 3 seeds | 250k | 250k |
+| 5 | 100k x 3 seeds | 100k | 100k |
+| 6 | 100k x 3 seeds | 100k | 100k |
+| 7 | 100k x 3 seeds | 100k | 100k |
+| 8 | 100k x 3 seeds | 100k | 100k |
 
-PASS threshold: no seat may have unilateral gain 95% upper bound above **0.03 ante** on either representative texture.
+For every one of the 12 fixed N/texture cases:
 
-As with HU, one solver-method correction + one rerun of failing cases is the maximum.
+- [ ] train the frozen candidate budget;
+- [ ] require 100% exact policy coverage;
+- [ ] run the fixed split-sample unilateral-response audit for every seat;
+- [ ] record profile EV and unilateral-response gain with 95% CI.
 
-P4 ends with a single frozen solver configuration and production iteration budget for each player-count mode N=2..8.
+PASS threshold: **every seat's unilateral-gain 95% upper bound must be <= 0.03 ante** on both representative textures.
+
+If one or more cases fail, P4C receives **one multiway solver-method correction targeted at response quality and one rerun of only the failing cases**. If any corrected case still fails, P4 is BLOCKED and the method changes; no iteration ladder or threshold relaxation is allowed.
+
+P4 ends with one frozen production method/configuration for each player-count mode N=2..8.
 
 ---
 
