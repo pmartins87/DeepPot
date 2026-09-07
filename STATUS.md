@@ -22,7 +22,7 @@ Current phase summary:
 - **P4D FP-PED:** BLOCKED;
 - **P4E projected Nash extragradient:** BLOCKED;
 - **P4F primal-dual worst-seat mirror-prox:** BLOCKED;
-- **P4G deterministic fixed-corpus worst-seat mirror-prox:** N=3 finite viability gate PREPARED;
+- **P4G deterministic fixed-corpus worst-seat mirror-prox:** N=3 finite viability gate RUNNING;
 - P5+ waits for P0/P4 closure.
 
 ## Mechanics confirmed
@@ -141,7 +141,7 @@ The rainbow failure blocks P4F, so no P4F N=4..8 scaling run is launched. Full r
 
 P4F also exposed an optimization-estimator mismatch: independently sampled BR-learning and gradient blocks frequently produced negative internal `seat_gaps`, and the final rainbow dual weights concentrated on seat 0 even though the untouched holdout found seat 2 to be the worst exploitable seat. This motivates an estimator reset rather than another P4F parameter ladder.
 
-### P4G deterministic fixed-corpus worst-seat mirror-prox: PREPARED
+### P4G deterministic fixed-corpus worst-seat mirror-prox: RUNNING
 
 P4G is implemented in `src/deeppot/multiway_fixed_corpus.py` and its complete N=3 protocol was frozen before results in `docs/P4G_FIXED_CORPUS_METHOD_RESET.md`.
 
@@ -157,9 +157,11 @@ Core change:
 
 Regression tests cover fixed-corpus reproducibility/hash stability, same-corpus BR non-negative-gap behavior, smooth-worst-seat weights, deterministic replay and policy-simplex preservation. CI passed before the P4G viability trigger.
 
+Current P4G N=3 workflow run: `34167399145`.
+
 ## Next branch
 
-Execute the frozen P4G N=3 rainbow/monotone viability gate exactly once. If both PASS, freeze the N=4..8 scaling schedule before observing any N=4 result. If either fails, mark P4G BLOCKED and change method rather than adding a P4G tuning ladder.
+If both frozen P4G N=3 cases PASS, freeze the N=4..8 scaling schedule before observing any N=4 result. If either fails, mark P4G BLOCKED and change method rather than adding a P4G tuning ladder.
 
 P5 all-1,755-flop production solving begins only after both P0 economy and P4 calibration are closed.
 
