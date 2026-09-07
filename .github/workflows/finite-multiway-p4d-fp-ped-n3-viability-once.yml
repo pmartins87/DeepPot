@@ -1,0 +1,119 @@
+name: Finite Multiway P4D FP-PED N3 Viability Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/finite-multiway-p4d-fp-ped-n3-viability-once.yml'
+
+jobs:
+  p4d-n3:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - id: n3_rainbow
+            flop: 'Ah 7d 2c'
+          - id: n3_monotone
+            flop: 'Ah 7h 2h'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build frozen exact CFR warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --players 3 \
+            --flop '${{ matrix.flop }}' \
+            --iterations 250000 \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/${{ matrix.id }}
+      - name: Rebuild frozen FP warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_refine \
+            --players 3 \
+            --policy runs/${{ matrix.id }}/policy_consensus.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --samples-per-round 50000 \
+            --prior-weight 4 \
+            --seed-base 9402026 \
+            --out-policy runs/${{ matrix.id }}/policy_fp_warm.csv \
+            --out-audit runs/${{ matrix.id }}/fp_warm_audit.json
+      - name: Run frozen sampled PED method reset
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_ped \
+            --players 3 \
+            --policy runs/${{ matrix.id }}/policy_fp_warm.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --br-samples-per-round 50000 \
+            --gradient-samples-per-round 50000 \
+            --initial-max-coordinate-step 0.10 \
+            --seed-base 9502026 \
+            --out-policy runs/${{ matrix.id }}/policy_fp_ped.csv \
+            --out-audit runs/${{ matrix.id }}/fp_ped_audit.json
+      - name: Run original independent response gate
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_response \
+            --players 3 \
+            --policy runs/${{ matrix.id }}/policy_fp_ped.csv \
+            --flop '${{ matrix.flop }}' \
+            --learn-samples 250000 \
+            --eval-samples 250000 \
+            --seed 9302026 \
+            --rake-pct 0.02 \
+            --out runs/${{ matrix.id }}/p4d_response.json
+      - name: Apply frozen P4D viability threshold
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('runs') / os.environ['CASE_ID']
+          summary = json.loads((root / 'summary.json').read_text())
+          response = json.loads((root / 'p4d_response.json').read_text())
+          coverage = summary['consensus']['shared_all_coverage']
+          seat_uppers = [x['ci95_high'] for x in response['unilateral_gain']]
+          result = {
+              'phase': 'P4D_N3_FP_PED_VIABILITY',
+              'case': os.environ['CASE_ID'],
+              'players': 3,
+              'flop': os.environ['FLOP'],
+              'coverage': coverage,
+              'seat_unilateral_gain_ci95_high': seat_uppers,
+              'threshold': 0.03,
+              'method': 'CFR_250k_x3_then_FP_32x50k_then_PED_32x_BR50k_GRAD50k',
+              'ped_max_step_schedule': '0.10/sqrt(round)',
+          }
+          result['pass'] = coverage == 1.0 and all(x <= 0.03 for x in seat_uppers)
+          (root / 'p4d_gate.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          if not result['pass']:
+              raise SystemExit(1)
+          PY
+        env:
+          CASE_ID: ${{ matrix.id }}
+          FLOP: ${{ matrix.flop }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p4d-fp-ped-${{ matrix.id }}
+          path: runs/${{ matrix.id }}/
