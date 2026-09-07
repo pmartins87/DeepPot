@@ -1,0 +1,31 @@
+name: Exact HU Benchmark Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/exact-hu-benchmark-once.yml'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run exact-state benchmark
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.benchmark \
+            --players 2 \
+            --flops 'Ah 7d 2c;Ah 7h 2c;Ah 7h 2h;Ah Ad 2c' \
+            --iterations '10000,50000' \
+            --seed 1 \
+            --rake-pct 0.02 \
+            --out exact_hu_benchmark.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-hu-benchmark
+          path: exact_hu_benchmark.json
