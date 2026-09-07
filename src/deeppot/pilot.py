@@ -14,7 +14,7 @@ from .cards import Card
 from .solver import ChanceSampledCFR, SolveResult
 from .validation import audit_to_dict, build_consensus
 
-PILOT_VERSION = "2026-09-07.3"
+PILOT_VERSION = "2026-09-07.4"
 
 
 def _source_hash() -> str:
@@ -47,10 +47,10 @@ def _parse_flop(text: str) -> tuple[Card, Card, Card]:
     return cards  # type: ignore[return-value]
 
 
-def _solve_one(args: tuple[int, tuple[Card, Card, Card], int, float, float | None]) -> SolveResult:
-    seed, flop, iterations, rake_pct, rake_cap = args
+def _solve_one(args: tuple[int, int, tuple[Card, Card, Card], int, float, float | None]) -> SolveResult:
+    num_players, seed, flop, iterations, rake_pct, rake_cap = args
     return ChanceSampledCFR(
-        num_players=2,
+        num_players=num_players,
         flop=flop,
         rake_pct=rake_pct,
         rake_cap=rake_cap,
@@ -130,7 +130,8 @@ def _write_consensus_policy(path: Path, results: list[SolveResult]) -> int:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="DeepPot HU fixed-flop exact-state cross-seed pilot")
+    ap = argparse.ArgumentParser(description="DeepPot fixed-flop exact-state cross-seed pilot for N=2..8")
+    ap.add_argument("--players", type=int, default=2)
     ap.add_argument("--flop", default="Ah 7d 2c")
     ap.add_argument("--iterations", type=int, default=10000)
     ap.add_argument("--seeds", default="1,2,3")
@@ -140,11 +141,13 @@ def main() -> None:
     ap.add_argument("--out-dir", default="")
     args = ap.parse_args()
 
+    if not 2 <= args.players <= 8:
+        raise SystemExit("--players must be between 2 and 8")
     flop = _parse_flop(args.flop)
     seeds = [int(x.strip()) for x in args.seeds.split(",") if x.strip()]
     if not seeds:
         raise SystemExit("No seeds supplied")
-    out = Path(args.out_dir) if args.out_dir else Path("runs") / f"hu_pilot_{int(time.time())}"
+    out = Path(args.out_dir) if args.out_dir else Path("runs") / f"n{args.players}_pilot_{int(time.time())}"
     out.mkdir(parents=True, exist_ok=True)
 
     manifest = {
@@ -154,6 +157,7 @@ def main() -> None:
         "generated_at_unix": time.time(),
         "python_version": sys.version,
         "platform": platform.platform(),
+        "num_players": args.players,
         "flop": [str(c) for c in flop],
         "iterations": args.iterations,
         "seeds": seeds,
@@ -166,7 +170,7 @@ def main() -> None:
     }
     (out / "RUN_MANIFEST.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    jobs = [(s, flop, args.iterations, args.rake_pct, args.rake_cap) for s in seeds]
+    jobs = [(args.players, s, flop, args.iterations, args.rake_pct, args.rake_cap) for s in seeds]
     started = time.perf_counter()
     if args.workers > 1:
         with ProcessPoolExecutor(max_workers=args.workers) as ex:
@@ -193,6 +197,7 @@ def main() -> None:
     pairwise, consensus = build_consensus(seed_policies)
     total_iterations = args.iterations * len(seeds)
     summary = {
+        "num_players": args.players,
         "pairwise": [audit_to_dict(x) for x in pairwise],
         "consensus": audit_to_dict(consensus),
         "consensus_policy_infosets": consensus_infosets,
