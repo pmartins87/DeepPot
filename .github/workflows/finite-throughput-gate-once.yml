@@ -14,15 +14,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Run fixed finite throughput gate
+      - name: Repeat same fixed gate after the one allowed terminal-rank optimization pass
         env:
           PYTHONPATH: src
         run: |
           python -m deeppot.throughput_gate \
             --seed 1 \
             --rake-pct 0.02 \
-            --out throughput_gate.json
+            --out throughput_gate_after_optimization.json
       - uses: actions/upload-artifact@v4
         with:
-          name: finite-throughput-gate
-          path: throughput_gate.json
+          name: finite-throughput-gate-after-optimization
+          path: throughput_gate_after_optimization.json
