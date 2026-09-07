@@ -30,7 +30,7 @@ def test_exact_space_is_larger_than_1755_times_169() -> None:
     summary = exact_state_space_summary()
     assert summary.naive_169_flop_states == 296_595
     assert summary.exact_flop_hole_orbits == 1_286_792
-    assert math.isclose(summary.exact_vs_169_ratio, 4.338552571688, rel_tol=1e-12)
+    assert math.isclose(summary.exact_vs_169_ratio, 4.3385492000876615, rel_tol=1e-12)
 
 
 def test_public_scenario_counts() -> None:
