@@ -4,7 +4,8 @@ Reference date: 2026-09-07
 
 ## State
 
-**P0 — Rules and economy gate: IN PROGRESS**
+**P0 — Rules and economy gate: IN PROGRESS**  
+**P1 — NLH game kernel: STARTED**
 
 Repository initialized from an empty `main` branch.
 
@@ -43,6 +44,16 @@ DeepPot will reuse DeepKK's layered architecture:
 
 But the solver state cannot reuse DeepKK's 169 preflop classes. DeepPot requires a flop-conditioned state representation.
 
+## Implemented in P1 so far
+
+- parameterized Pot Fold pot/rake economics probe;
+- fixed continue cost equal to the initial pot;
+- binary `STAY/FOLD` action-tree kernel for arbitrary player count;
+- automatic showdown after all remaining players complete their flop decision;
+- provisional last-player/no-op uncontested terminal (explicitly blocked for live confirmation before strategy publication);
+- regression tests reproducing KKPoker's official 3-handed 3c-ante example (9c initial pot -> 27c with two continuers);
+- initial GitHub Actions CI workflow.
+
 ## Immediate blockers to close P0
 
 1. Pot Fold lobby/table screenshot showing stake/ante, number of seats and rake/cap information if displayed.
@@ -52,4 +63,4 @@ But the solver state cannot reuse DeepKK's 169 preflop classes. DeepPot requires
 
 ## Next implementation target
 
-P1 game kernel + P2 canonical flop/equity prototype can proceed in parallel because both are parameterized. Publication of an official strategy remains blocked until P0's economy is confirmed.
+Proceed with P2 canonical flop/equity prototype while P0 evidence is collected. Publication of an official strategy remains blocked until P0's economy is confirmed.
