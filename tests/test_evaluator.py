@@ -1,5 +1,7 @@
-from deeppot.cards import Card
-from deeppot.evaluator import evaluate_seven, showdown_winners
+import random
+
+from deeppot.cards import Card, full_deck
+from deeppot.evaluator import evaluate_seven, evaluate_seven_reference, showdown_winners
 from deeppot.equity import exact_hu_equity_on_flop
 
 
@@ -17,6 +19,14 @@ def test_wheel_straight() -> None:
     wheel = evaluate_seven(cards("As 2c 3d 4h 5s Kc Qd"))
     six_high = evaluate_seven(cards("2s 3c 4d 5h 6s Kc Qd"))
     assert six_high > wheel
+
+
+def test_direct_seven_card_evaluator_matches_reference_random_sample() -> None:
+    rng = random.Random(20260907)
+    deck = list(full_deck())
+    for _ in range(2000):
+        sample = tuple(rng.sample(deck, 7))
+        assert evaluate_seven(sample) == evaluate_seven_reference(sample)
 
 
 def test_exact_hu_flop_has_990_runouts() -> None:
