@@ -77,11 +77,22 @@ bool EnsureStrategyLoaded(std::string* error) {
 bool ReadCard(const char* rank_symbol, const char* suit_symbol, deeppot_runtime::Card* out) {
   const int rank = IntSymbol(rank_symbol);
   const int openholdem_suit = IntSymbol(suit_symbol);
-  // OpenHoldem card-suit symbols use Clubs=1, Diamonds=2, Hearts=3, Spades=4.
-  // DeepPot's exact-state engine uses the zero-based order c=0,d=1,h=2,s=3.
-  if (rank < 2 || rank > 14 || openholdem_suit < 1 || openholdem_suit > 4) return false;
+
+  // OpenHoldem exposes the PokerEval/StdDeck zero-based suit values:
+  //   Hearts=0, Diamonds=1, Clubs=2, Spades=3.
+  // DeepPot's exact-state engine uses:
+  //   Clubs=0, Diamonds=1, Hearts=2, Spades=3.
+  // Therefore this is NOT an identity mapping and must not use +/-1 arithmetic.
+  if (rank < 2 || rank > 14 || openholdem_suit < 0 || openholdem_suit > 3) return false;
+
+  static const int kOpenHoldemSuitToDeepPot[4] = {
+      2,  // OH Hearts   -> DeepPot Hearts
+      1,  // OH Diamonds -> DeepPot Diamonds
+      0,  // OH Clubs    -> DeepPot Clubs
+      3,  // OH Spades   -> DeepPot Spades
+  };
   out->rank = rank;
-  out->suit = openholdem_suit - 1;
+  out->suit = kOpenHoldemSuitToDeepPot[openholdem_suit];
   return true;
 }
 
