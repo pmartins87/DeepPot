@@ -18,60 +18,106 @@ Ryzen single-process A/B at 5,000 iterations:
 - N=5: 3.75x speedup;
 - N=8: 4.25x speedup.
 
-Ryzen N=8 parallel scaling for the fast-v1 kernel, 62 tasks x 3,000 iterations:
+Ryzen N=8 parallel scaling for fast-v1, 62 tasks x 3,000 iterations:
 
 - 15 workers: wall 15.044 s, 3,140,417 nodes/s;
 - 23 workers: wall 9.321 s, 5,068,701 nodes/s;
 - 31 workers: wall 8.568 s, 5,514,008 nodes/s.
 
-**31 workers remains the winner** for this kernel and stays the production candidate.
+**31 workers remains the winner.**
 
-The post-optimization N=8 profile shows the bottleneck has moved almost entirely into `_cfr_fast` itself. The evaluator is now a secondary cost. The largest remaining Python work is recursive CFR utility-vector construction, terminal utility materialization and reach/counterfactual-reach bookkeeping.
+## Fast-v2 accepted as the Python production candidate
 
-## Second-pass low-risk optimization
+`src/deeppot/fast_solver_v2.py` removes only redundant reach-vector bookkeeping from the strictly sequential one-decision-per-player Pot Fold tree. It carries the ordered product of prior action probabilities as one scalar. The chance trajectory, infoset keys, FOLD-before-STAY traversal, CFR+ regrets, global linear averaging and terminal utilities remain unchanged.
 
-Before deciding whether to start the multi-day canonical master, one additional low-risk Python optimization is being tested in `src/deeppot/fast_solver_v2.py`.
+CI differential tests against the original reference solver require exact equality of:
 
-Pot Fold's public decision tree is strictly sequential and each player acts at most once. Consequently, at the moment actor `i` acts, its own reach probability is always exactly 1.0. The reference implementation nevertheless carries a full reach vector and reconstructs counterfactual reach by multiplying all opponent entries at every public node.
+- visit counts;
+- regrets;
+- strategy sums;
+- RNG state;
+- resume trajectory.
 
-Fast-v2 removes only that redundant representation:
+Those tests pass.
 
-- it carries the ordered product of prior action probabilities as one scalar;
-- child counterfactual reach is `prior_path_reach * action_probability`;
-- the current actor's linear-average reach multiplier remains exactly 1.0;
-- the chance/RNG trajectory, public/private keys, regrets, policy sums, traversal order and terminal utility are unchanged.
+### Ryzen fast-v1 -> fast-v2 A/B
 
-This is not a solver-method change. Exact differential tests against the reference solver are mandatory and are included in CI.
+Representative flop 877, 5,000 iterations per implementation/N:
 
-The one-command Ryzen gate is:
+| N | fast-v1 | fast-v2 | Additional speedup | fast-v2 nodes/s |
+|---|---:|---:|---:|---:|
+| 2 | 0.090 s | 0.089 s | 1.02x | 112,654 |
+| 5 | 0.390 s | 0.363 s | 1.07x | 412,853 |
+| 8 | 2.869 s | 2.532 s | **1.13x** | **501,618** |
+
+Fast-v2 31-worker N=8 parallel check, 62 tasks:
+
+- wall: **7.354 s**;
+- aggregate throughput: **6,423,910 decision nodes/s**;
+- task mean: 2.956 s;
+- task max: 3.027 s.
+
+This is an additional ~13% N=8 gain on top of fast-v1 and is material because N=8 dominates the exact state space. Fast-v2 is therefore the accepted Python kernel candidate for the canonical continuous master.
+
+## Canonical fast-v2 continuous infrastructure
+
+The paused pilot root remains preserved:
+
+`C:\DeepPot\runs\continuous_master`
+
+It stopped safely at weighted mean visits 1.90 and must not be mixed with the optimized trajectory.
+
+The optimized canonical root is intentionally separate:
+
+`C:\DeepPot\runs\continuous_master_fast_v2`
+
+New source-locked components:
+
+- `src/deeppot/continuous_training_fast_v2.py` — persistent fast-v2 state, atomic checkpoint, exact RNG resume and visit statistics;
+- `src/deeppot/continuous_runner_fast_v2.py` — hardened 31-worker interruptible runner;
+- `tools/run_deeppot_continuous_fast_v2.ps1` — canonical one-command launcher;
+- `tests/test_continuous_fast_v2_resume.py` — persistent checkpoint/load/continue exactness test.
+
+The original pilot modules and root remain available for traceability.
+
+## Final end-to-end gate before the multi-day run
+
+Compute-only benchmarks do not include loading, dense-state scan, serialization, fsync and atomic file replacement. Therefore one final short Ryzen gate is mandatory before launching the canonical 1000-min-visit master:
 
 ```powershell
 cd C:\DeepPot
 git pull
-powershell -ExecutionPolicy Bypass -File .\tools\benchmark_deeppot_fast_v2.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\benchmark_deeppot_continuous_fast_v2_e2e.ps1
 ```
 
-It compares fast-v1 vs fast-v2 at N=2/5/8 and also performs a 31-worker N=8 parallel check.
+This benchmark uses 31 representative N=8 flop tasks and the real canonical 50,000-iteration checkpoint size. It executes:
 
-## Decision rule after fast-v2
+1. a fresh 50k wave including state/greedy/summary checkpoint;
+2. a resumed 50k wave including persisted CFR/RNG load and atomic replacement checkpoint.
 
-- If v2 gives a material additional gain and exact tests pass, v2 becomes the Python kernel candidate for continuous production.
-- If the gain is small, stop Python micro-optimization and use fast-v1.
-- Do **not** jump to a native C++ rewrite merely because it may be faster. With fast-v1 already at ~5.5 million N=8 decision nodes/s on 31 workers, native work is justified only if the projected end-to-end 1000-min-visit runtime remains operationally expensive after checkpoint/I/O measurement.
-- Before the final long run, perform one end-to-end checkpoint/resume benchmark using the accepted kernel, because compute-only speedup does not include full-state serialization cost.
+It reports actual end-to-end nodes/s, visit-min distribution after 100k iterations and a rough runtime projection to min_visit ~1000. It writes only under:
 
-## Canonical master rule
+`C:\DeepPot\runs\kernel_benchmark_continuous_fast_v2_e2e`
 
-The paused `C:\DeepPot\runs\continuous_master` remains a preserved pilot trajectory (`weighted mean visits = 1.90`, `target tasks = 0/12,285`). It is not the canonical V1.1 -> V1.2 -> V2 trajectory.
+and does not touch either continuous master.
 
-If fast-v1 or fast-v2 is accepted, start a fresh, source-locked optimized canonical master from iteration 1 under a new root. Do not mix the optimized kernel into the pilot states.
+## C++ decision rule
+
+Do **not** implement a native C++ rewrite by default. Fast-v2 already reaches ~6.42 million N=8 decision nodes/s in the short 31-worker scaling test. Native work is justified only if the end-to-end gate shows that the true 1000-min-visit runtime remains operationally expensive enough to outweigh implementation and equivalence-validation cost.
+
+If the E2E runtime is reasonable, stop performance work and launch fast-v2. This follows the project rule: maximize poker quality and useful compute, not engineering complexity for its own sake.
+
+## Canonical master rules
 
 The final canonical trajectory must retain:
 
-- every exact infoset;
+- all 635,675,248 exact infosets;
+- all 1,755 canonical flops and 494 public scenarios;
 - target minimum 1,000 real training visits per exact infoset;
-- CFR+ and linear averaging;
-- 31 workers unless a later accepted kernel materially changes scaling;
-- resumable regrets, strategy sums, visit counts and RNG;
-- arbitrary snapshots (V1.1/V1.2/V2) without consuming or restarting the master;
-- optional continuation beyond 1,000 by raising only the stop target.
+- CFR+ and global linear averaging;
+- 31 workers;
+- no strategic abstraction or pruning;
+- persistent regrets, strategy sums, visit counts and RNG;
+- graceful Ctrl+C pause and exact resume;
+- arbitrary V1.1/V1.2/V2 snapshots without consuming or restarting the master;
+- optional continuation beyond 1,000 by changing only the stop target.
