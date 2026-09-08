@@ -70,7 +70,7 @@ Every nonterminal public FOLD/STAY history is explicitly enumerated. The BTN all
 
 # P3 — DeepKK-parity generator/package
 
-Status: **PASS / READY**
+Status: **PASS / CLOSED**
 
 Implemented:
 
@@ -89,18 +89,9 @@ Implemented:
 - [x] generated DeepPot mathematical TXT with one named STAY list per scenario;
 - [x] Windows/Ryzen one-command launcher;
 - [x] regression test proving compact audit produces the same final decisions as the row-form DeepKK-style evaluator;
-- [x] one finite local worker-count benchmark, with 31 preserved as DeepKK fallback.
+- [x] one finite local worker-count benchmark.
 
-Canonical production entry point:
-
-`tools/run_deeppot_ryzen.ps1`
-
-Worker calibration entry point:
-
-`tools/benchmark_deeppot_workers.ps1`
-
-Guide: `docs/RYZEN_DEEPKK_PARITY_RUN.md`.
-Worker protocol: `docs/RYZEN_WORKER_BENCHMARK_PROTOCOL.md`.
+Canonical production entry point: `tools/run_deeppot_ryzen.ps1`.
 
 Frozen first-run budget:
 
@@ -112,7 +103,8 @@ Frozen first-run budget:
 - minimum effective visits 25;
 - CFR+ + linear average;
 - `abs(EV_STAY-EV_FOLD)>CI95` for EV override;
-- otherwise solver-average greedy fallback.
+- otherwise solver-average greedy fallback;
+- **31 workers**, selected on the target Ryzen.
 
 The exact strategy contains **635,675,248 decisions** across N=2..8. They are stored losslessly in bitsets instead of a 600M-row CSV/TXT.
 
@@ -120,13 +112,22 @@ The exact strategy contains **635,675,248 decisions** across N=2..8. They are st
 
 # P4 — Official Ryzen mathematical-base run
 
-Status: **READY AFTER ONE LOCAL WORKER BENCHMARK**
+Status: **READY TO START — 31 WORKERS FROZEN**
 
 This is the direct DeepPot counterpart of the official DeepKK Ryzen run.
 
-- [ ] run the frozen worker benchmark once on the target Ryzen; on 32 logical processors the candidates are exactly 15, 23 and 31;
-- [ ] accept the lowest one-pass wall-time result and write `selected_workers.txt`; no second tuning ladder;
-- [ ] execute `tools/run_deeppot_ryzen.ps1` on the Ryzen 9; the launcher reads the selected worker count automatically;
+Worker benchmark is complete:
+
+- [x] run frozen target-machine benchmark once;
+- [x] compare exactly 15, 23 and 31 workers;
+- [x] select lowest one-pass wall time;
+- [x] selected **31 workers**;
+- [x] record evidence in `docs/RYZEN_WORKER_BENCHMARK_RESULT_20260908.md`;
+- [x] no second worker tuning ladder.
+
+Production run:
+
+- [ ] execute `tools/run_deeppot_ryzen.ps1` on the Ryzen 9;
 - [ ] complete all 1,755 flops for N=2..8;
 - [ ] preserve every completed flop checkpoint;
 - [ ] finish EV/CI audit for every flop;
@@ -135,7 +136,7 @@ This is the direct DeepPot counterpart of the official DeepKK Ryzen run.
 - [ ] verify completed manifest and SHA256 hashes;
 - [ ] review per-mode coverage/confidence summary once, without adding a new solver-method ladder.
 
-Measured solver throughput implies about 127 aggregate CPU-hours for the solve portion at the frozen 20k budget. Parallel Ryzen execution should therefore be an hours-scale production job; audit and I/O add additional time.
+Measured solver throughput implies about 127 aggregate CPU-hours for the solve portion at the frozen 20k budget. Parallel execution plus the larger 50k audit makes this an hours-scale production run.
 
 If interrupted, rerun the exact same command and resume from checkpoints.
 
@@ -156,8 +157,6 @@ Freeze and preserve:
 - audit summaries;
 - run manifest;
 - source/config/economy SHA256 hashes.
-
-`DeepPot.txt` keeps DeepKK-like scenario/list organization. Exact list membership is stored in compiled bitsets because native OpenPPL handlists cannot encode flop-relative postflop state without losing information.
 
 ---
 
