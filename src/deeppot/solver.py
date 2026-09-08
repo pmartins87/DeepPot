@@ -83,10 +83,9 @@ class ChanceSampledCFR:
     otherwise re-evaluate the same seven-card hands many times. The optimization
     changes no game state, chance distribution, payoff, or strategic abstraction.
 
-    This mirrors DeepKK's CFR+/linear-average architecture while preserving an
-    explicit caveat: rake makes total utility path-dependent, and N>2 is a
-    multiplayer game. Output remains experimental until it passes the dedicated
-    finite response gates in P4.
+    Persistent DeepPot training resumes by restoring this object's nodes, RNG
+    state and the global linear-averaging iteration offset. Continuing from an
+    offset therefore executes the exact same recurrence as one uninterrupted run.
     """
 
     def __init__(
@@ -215,10 +214,13 @@ class ChanceSampledCFR:
             node.strategy_sum[a_idx] += weight * reach[actor] * strategy[a_idx]
         return tuple(node_util)
 
-    def solve(self, iterations: int) -> SolveResult:
+    def _run_iterations(self, iterations: int, *, iteration_offset: int) -> SolveResult:
         if iterations <= 0:
             raise ValueError("iterations must be > 0")
-        for iteration in range(1, iterations + 1):
+        if iteration_offset < 0:
+            raise ValueError("iteration_offset must be >= 0")
+        for local_iteration in range(1, iterations + 1):
+            iteration = iteration_offset + local_iteration
             deal = self._sample_deal()
             self._cfr(
                 PotFoldState.initial(self.rules),
@@ -227,9 +229,17 @@ class ChanceSampledCFR:
                 iteration,
             )
         return SolveResult(
-            iterations=iterations,
+            iterations=iteration_offset + iterations,
             seed=self.seed,
             nodes=self.nodes,
             hole_state_count=self.hole_state_count,
             flop_key=self.exact_index.flop_key,
         )
+
+    def solve(self, iterations: int) -> SolveResult:
+        """Start a fresh trajectory at global linear-average iteration 1."""
+        return self._run_iterations(iterations, iteration_offset=0)
+
+    def continue_solve(self, additional_iterations: int, *, completed_iterations: int) -> SolveResult:
+        """Continue a restored trajectory without resetting linear-average weights."""
+        return self._run_iterations(additional_iterations, iteration_offset=completed_iterations)
