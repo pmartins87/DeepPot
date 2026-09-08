@@ -10,46 +10,27 @@ DeepPot NLH Base v1 is locked to the **same production methodology used for Deep
 
 Authoritative decision: `docs/DEEPPOT_DEEPKK_METHOD_LOCK.md`.
 
-P4C..P4I are archived research diagnostics and are no longer release blockers. P4I finished and failed its former N=4 gate; no P4J/P4K chain will follow.
+P4C..P4I are archived research diagnostics and are no longer release blockers. No P4J/P4K chain will follow.
 
-## Foundation complete
+## P4 mathematical base — RUNNING
 
-- mechanics: complete;
-- economy: three live observations consistent with 2% gross-pot deduction; cap/profile variation still unconfirmed;
-- exact game kernel: PASS;
-- 1,755 canonical flops;
-- 1,286,792 exact canonical `(flop, hero hole)` states;
-- exact 2–8 player public action tree;
-- 494 explicit public decision scenarios;
-- CFR+ / linear-average solver implemented;
-- multiprocessing and resumable per-flop checkpoints implemented;
-- DeepKK-style EV/CI95 evaluator implemented;
-- compact lossless production audit implemented;
-- Windows/Ryzen production launcher implemented;
-- finite local worker-count benchmark completed.
+The official target-Ryzen run has been started from `C:\DeepPot` with the frozen configuration:
 
-## Frozen DeepKK-parity production budget
-
-The first full Ryzen run is configured as:
-
-- N=2 through N=8;
-- all 1,755 canonical flops;
+- N=2..8;
+- all 1,755 canonical flops per mode;
 - seed 123;
-- CFR+ enabled;
-- linear averaging enabled;
-- **20,000 solver iterations per flop**;
-- **50,000 independent EV-audit samples per flop**;
-- minimum effective visits for an EV override: **25**;
-- confidence rule: `abs(EV_STAY-EV_FOLD) > CI95`;
-- inconclusive state: retain solver-average greedy action;
-- economy profile recorded explicitly as `provisional-2pct-uncapped` for the first run;
-- **31 workers**, selected by the frozen local benchmark.
+- CFR+ + linear average;
+- 20,000 solver iterations/flop;
+- 50,000 independent EV-audit samples/flop;
+- minimum effective visits 25;
+- confident EV-best else solver-average greedy fallback;
+- provisional economy `provisional-2pct-uncapped`;
+- **31 workers** selected by the frozen local benchmark.
 
-Measured solve throughput implies about **127 aggregate CPU-hours** for the N=2..8 solve portion. Audit and I/O add further work.
+Output root: `C:\DeepPot\runs\deepkk_parity_full`.
+The run is checkpoint/restart safe.
 
-## Worker-count decision — CLOSED
-
-The one allowed local benchmark was completed on the target 32-logical-thread Ryzen using the frozen candidates 15, 23 and 31.
+## Worker benchmark — CLOSED
 
 | workers | wall seconds | jobs/min |
 |---:|---:|---:|
@@ -57,59 +38,73 @@ The one allowed local benchmark was completed on the target 32-logical-thread Ry
 | 23 | 62.2139 | 61.7226 |
 | **31** | **61.8000** | **62.1359** |
 
-Result: **31 workers selected**. It beat 23 by about 0.665% and 15 by about 34.0% wall time. No second worker tuning ladder will be run.
+31 is frozen. No second worker tuning ladder.
 
-Evidence: `docs/RYZEN_WORKER_BENCHMARK_RESULT_20260908.md`.
+## Exact strategy representation
 
-The local machine already contains `runs/worker_benchmark/selected_workers.txt`, and `tools/run_deeppot_ryzen.ps1` reads it automatically.
+The complete N=2..8 base contains **635,675,248 exact information-set decisions** over 494 public decision scenarios.
 
-## Exact output size and 494 lists
+Final live membership is stored losslessly as dense bitsets: one bit per exact state, 1=STAY and 0=FOLD. Solver/confidence/low-coverage bitsets remain separately available for audit. No bucketting or strategic card abstraction is introduced.
 
-Across N=2..8 the final exact base contains **635,675,248 information-set decisions**.
+## P6 OpenHoldem — IN PROGRESS WHILE P4 RUNS
 
-A literal TXT/CSV expansion would be multi-gigabyte and native OpenPPL handlists cannot represent flop-relative exact states anyway. Production keeps the same DeepKK list semantics while storing membership losslessly as dense bitsets:
+The runtime-independent part has now advanced substantially:
 
-- `final`: final STAY/FOLD list membership;
-- `solver`: raw solver-average greedy membership;
-- `confident`: EV/CI confidence flag;
-- `low_coverage`: effective-visit flag.
+- `src/deeppot/runtime_contract.py`: one signed action/scenario code for all 494 scenarios;
+- `src/deeppot/runtime_package.py`: verifies and compiles completed mathematical output into the minimal live package;
+- `src/deeppot/openholdem_formula.py`: generates the DeepKK-like operational TXT with 494 explicit situations and 494 explicit logical STAY-list membership functions;
+- `runtime/deeppot_runtime_core.{h,cpp}`: portable C++ exact canonicalization/index/bit lookup;
+- `runtime/openholdem/deeppot_userdll.cpp`: OpenHoldem adapter with one `dll$deeppot_action`, deterministic HIT/MISS logs and fail-closed behavior;
+- `tools/build_deeppot_runtime.ps1`: one post-training command to compile the completed mathematical base into the live runtime package and safe-disabled formula;
+- `docs/P6_OPENHOLDEM_RUNTIME.md`: operational architecture and remaining live gates.
 
-`DeepPot.txt` contains exactly **494 named STAY-list blocks**, one for every public scenario, and references the matching exact compiled list data. No state bucketing or strategic approximation is introduced.
+Regression tests cover:
 
-## Production package
+- exact runtime scenario IDs versus trainer IDs;
+- signed codes exactly ±1..±494;
+- 494 situation + 494 STAY-membership formula structure;
+- mathematical-run -> runtime-package compilation;
+- Python-reference versus compiled C++ lookup on the same exact flop/hole/scenario state.
 
-Ready files:
+DeepPot CI passed the C++/Python lookup test before the OpenHoldem adapter integration. The current OpenHoldem adapter additionally normalizes OpenHoldem suit values Clubs=1..Spades=4 to DeepPot c=0..s=3.
 
-- `src/deeppot/deepkk_style_streaming.py`
-- `src/deeppot/deepkk_style_compact.py`
-- `src/deeppot/deepkk_style_export.py`
-- `src/deeppot/worker_benchmark.py`
-- `tools/benchmark_deeppot_workers.ps1`
-- `tools/run_deeppot_ryzen.ps1`
-- `docs/RYZEN_WORKER_BENCHMARK_PROTOCOL.md`
-- `docs/RYZEN_WORKER_BENCHMARK_RESULT_20260908.md`
-- `docs/RYZEN_DEEPKK_PARITY_RUN.md`
+## Isolated OpenHoldem branch
 
-Regression CI confirms that the compact production audit yields the same final decisions as the row-form DeepKK-style EV/CI evaluator.
+A dedicated branch now exists in `pmartins87/myoh_private`:
 
-## Current active phase
+`deeppot_runtime_v1`
 
-**P4 — official Ryzen mathematical-base run: READY TO START WITH 31 WORKERS.**
+It is isolated from the existing OpenOFC/default development. On that branch:
 
-From `C:\DeepPot` on the target Ryzen:
+- the generic demo `user.cpp` has been replaced by the DeepPot adapter;
+- `deeppot_runtime_core.{h,cpp}` has been added to `DLLs/User_DLL`;
+- `user.vcxproj` includes the runtime core;
+- a dedicated Win32 Release `user.dll` GitHub Actions build gate has been added.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\run_deeppot_ryzen.ps1
-```
+The first Windows build attempt reached compilation but the newest Windows runner lacked `atlstr.h` required by OpenHoldem's unchanged helper `OpenHoldemFunctions.cpp`. This is an environment/dependency issue, not a DeepPot lookup failure. The build gate has been moved to the VS2022 Windows runner, which is being used to resolve that single build dependency without changing solver/runtime semantics.
 
-The launcher reads the already-created 31-worker selection automatically. The run is restart-safe: executing the same command again resumes valid completed flop checkpoints.
+## Remaining P6 facts that must come from the live table
 
-After P4 completes, freeze the mathematical source/hashes and proceed directly to the DeepKK-like OpenHoldem operational layer.
+These are intentionally not guessed:
 
-## Useful remaining live economy evidence
+- Pot Fold tablemap/scraper;
+- actual KKPoker chair numbering and BTN/action-order orientation;
+- confirmation that `playersdealtbits`, `playersplayingbits` and `foldbits2` reproduce the binary prior FOLD/STAY history correctly;
+- actual OpenHoldem action/button mapping that pays the fixed Pot Fold STAY amount.
 
-For a clean Pot Fold payout observation capture:
+`BetPot` is currently only a syntactically valid **disabled placeholder**. Generated operational formulas keep `f$deeppot_live_enabled=false` until those items pass shadow validation.
 
-`players dealt | ante | table/stake label | FOLD/STAY sequence | gross terminal pot | amount awarded | net stack change | separate fee/rake line | jackpot/other fee if present`
+## What happens when P4 finishes
 
-Highest-value remaining evidence is one reconstructable multiway hand and one relatively large terminal pot to test whether a rake cap exists. This evidence does not block the provisional-profile Ryzen run.
+After the running Ryzen process reaches `stage=completed`:
+
+1. freeze mathematical outputs/hashes;
+2. update the local repository only after the process has stopped;
+3. run `tools/build_deeppot_runtime.ps1`;
+4. compile/copy the Win32 DeepPot `user.dll`;
+5. validate tablemap and exact live state recognition;
+6. perform the single exhaustive mathematical-to-runtime equivalence gate;
+7. run exactly 200 shadow decisions;
+8. then exactly 200 smallest-stake live autoplayer decisions.
+
+No new solver-method ladder is planned.
