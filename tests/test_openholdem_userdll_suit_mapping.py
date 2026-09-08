@@ -8,11 +8,13 @@ def test_openholdem_adapter_uses_stddeck_zero_based_suit_mapping() -> None:
     # OpenHoldem/PokerEval StdDeck: H=0,D=1,C=2,S=3.
     # DeepPot exact-state engine: C=0,D=1,H=2,S=3.
     # Adapter mapping therefore must be [2,1,0,3], not +/-1 arithmetic.
-    match = re.search(
-        r"kOpenHoldemSuitToDeepPot\[4\]\s*=\s*\{\s*2\s*,.*?1\s*,.*?0\s*,.*?3\s*,?\s*\}",
+    body = re.search(
+        r"kOpenHoldemSuitToDeepPot\[4\]\s*=\s*\{(.*?)\};",
         source,
         flags=re.S,
     )
-    assert match is not None
+    assert body is not None
+    values = [int(x) for x in re.findall(r"(?m)^\s*(\d+)\s*,", body.group(1))]
+    assert values == [2, 1, 0, 3]
     assert "openholdem_suit < 0 || openholdem_suit > 3" in source
     assert "openholdem_suit - 1" not in source
