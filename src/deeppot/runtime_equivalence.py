@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from .runtime_package import load_runtime_index
+from .runtime_package import _flop_codes_from_texts, load_runtime_index
 
 EXPECTED_TOTAL_INFOSETS = 635_675_248
 EXPECTED_FLOPS = 1_755
@@ -79,6 +79,8 @@ def verify_equivalence(run_dir: str | Path, runtime_dir: str | Path, out_path: s
             rr = runtime_index[slot]
             if int(src["flop_index"]) != rr.flop_index:
                 index_mismatches += 1
+            if tuple(_flop_codes_from_texts(tuple(src["flop"]))) != rr.card_codes:
+                index_mismatches += 1
             if int(src["hole_state_count"]) != rr.hole_state_count:
                 index_mismatches += 1
             infosets += int(src["expected_infosets"])
@@ -136,10 +138,10 @@ def verify_equivalence(run_dir: str | Path, runtime_dir: str | Path, out_path: s
         "index_metadata_mismatches": total_index_metadata_mismatches,
         "modes": mode_rows,
         "proof_scope": (
-            "All 1,755 source flop records per N are matched to the runtime index; every per-flop "
-            "hole-state width and infoset count is accounted for; source and runtime final action "
-            "vectors are XOR-compared byte-for-byte. Exact card canonicalization/query implementation "
-            "is separately regression-tested Python vs compiled C++."
+            "All 1,755 source flop records per N are matched to runtime flop index/card codes; every "
+            "per-flop hole-state width and infoset count is accounted for; source and runtime final "
+            "action vectors are XOR-compared byte-for-byte. Exact card canonicalization/query "
+            "implementation is separately regression-tested Python vs compiled C++."
         ),
     }
 
