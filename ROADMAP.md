@@ -10,7 +10,12 @@ Base v1 is frozen and already in live testing. A separate continuous CFR track n
 
 Authoritative method lock: `docs/DEEPPOT_DEEPKK_METHOD_LOCK.md`.
 
-Authoritative deep-training policy: `docs/CONTINUOUS_TRAINING_V2.md`.
+Authoritative deep-training/performance policy:
+
+- `docs/CONTINUOUS_TRAINING_V2.md`;
+- `docs/CONTINUOUS_PERFORMANCE_GATE.md`;
+- `docs/CONTINUOUS_FAST_V2_GATE.md`;
+- `docs/CONTINUOUS_TRAINING_POST1000.md`.
 
 ---
 
@@ -168,11 +173,11 @@ The user elected to follow the practical DeepKK-style route rather than make a s
 
 # D1 — Continuous exact CFR infrastructure
 
-Status: **IMPLEMENTED / PRE-RUN VALIDATION**
+Status: **PASS / IMPLEMENTED**
 
 Goal: one long mathematical trajectory that can be interrupted, snapshotted and resumed without losing accumulated CFR state.
 
-- [x] add `continue_solve` with correct global linear-average iteration offset;
+- [x] correct global linear-average iteration continuation;
 - [x] persist both regrets per infoset;
 - [x] persist both linear-average strategy sums per infoset;
 - [x] persist exact visit count per infoset;
@@ -183,23 +188,74 @@ Goal: one long mathematical trajectory that can be interrupted, snapshotted and 
 - [x] 12,285 task scheduler (7 modes × 1,755 flops);
 - [x] interleave N2..N8 by flop for balanced arbitrary-time snapshots;
 - [x] 50,000-iteration default checkpoint chunks;
-- [x] use frozen 31-worker benchmark;
 - [x] graceful Ctrl+C drain + `SAFE TO CLOSE`;
-- [x] same-command exact resume;
-- [x] record worker errors as manifest stage `error` before raising;
+- [x] exact resume;
 - [x] initial 30 GiB free-space gate;
 - [x] resumed-session 2 GiB working-space gate;
-- [x] dependency-free exact-resume smoke script;
-- [ ] CI green on the finalized infrastructure;
-- [ ] Ryzen smoke PASS;
+- [x] arbitrary-time snapshot export and policy XOR comparison;
+- [x] original pilot preflight/resume smoke PASS on Ryzen.
 
-Estimated persistent state: **~21.31 GiB** plus small metadata/snapshot overhead.
+Estimated persistent state: **~21.31 GiB** plus metadata/snapshot overhead.
+
+---
+
+# D1A — Pilot continuous master
+
+Status: **PAUSED / PRESERVED / NON-CANONICAL**
+
+Root:
+
+`C:\DeepPot\runs\continuous_master`
+
+Final safe pause:
+
+- weighted mean visits 1.90;
+- task min-visit median 0;
+- target tasks 0/12,285;
+- `SAFE TO CLOSE` printed.
+
+The pilot used the original Python kernel. It is preserved for traceability but will not be mixed with the optimized canonical trajectory.
+
+---
+
+# D1B — Kernel performance gate
+
+Status: **FAST V2 ACCEPTED**
+
+Reference N=8 baseline on flop 877:
+
+- 87,850 decision nodes/s single process.
+
+Fast-v1:
+
+- 4.25x N=8 single-process speedup;
+- parallel scaling winner remains 31 workers;
+- 31-worker throughput 5,514,008 nodes/s.
+
+Fast-v2 (`FastChanceSampledCFRV2`):
+
+- exact differential tests vs original reference solver PASS for visit counts, regrets, strategy sums, RNG and resume;
+- N=8 fast-v1 -> fast-v2 additional speedup **1.13x**;
+- N=8 fast-v2 single process **501,618 nodes/s**;
+- N=8 fast-v2 31-worker aggregate **6,423,910 nodes/s**;
+- 31 workers remains the production winner.
+
+Decision:
+
+- [x] accept fast-v2 as Python production candidate;
+- [x] preserve pilot root untouched;
+- [x] create separate fast-v2 continuous state/runner/launcher;
+- [x] create persistent checkpoint/resume exactness test;
+- [ ] run final E2E compute+checkpoint gate;
+- [ ] decide whether C++ is unnecessary or justified based on E2E runtime.
+
+Native C++ is **not** a default requirement. It is only justified if the final E2E runtime remains operationally expensive enough to outweigh implementation/equivalence-validation cost.
 
 ---
 
 # D2 — Deep training target
 
-Status: **NOT STARTED**
+Status: **WAITING ONLY FOR FINAL E2E GATE**
 
 Frozen first major target:
 
@@ -207,11 +263,20 @@ Frozen first major target:
 
 This replaces the vague “15 days” concept. Calendar time is only an estimate.
 
-- [ ] start `runs\continuous_master` on Ryzen;
+Canonical optimized root:
+
+`C:\DeepPot\runs\continuous_master_fast_v2`
+
+Canonical launcher:
+
+`tools\run_deeppot_continuous_fast_v2.ps1`
+
+- [ ] run the final E2E gate;
+- [ ] if runtime is reasonable, stop optimization and launch the fast-v2 master from iteration 1;
 - [ ] keep CFR+ / linear average / seed123 / 2% provisional uncapped economy;
 - [ ] monitor exact min/p1/p5/median/mean/p95/max visit depth;
 - [ ] stop automatically only when every task's minimum reaches target;
-- [ ] if policy still changes materially at 1,000, continue same master deeper rather than restart.
+- [ ] if policy still changes materially at 1,000, continue the same master to 1,500/2,000+ rather than restart.
 
 `1000` is a pragmatic target, not a proof of optimality.
 
@@ -219,17 +284,17 @@ This replaces the vague “15 days” concept. Calendar time is only an estimate
 
 # D3 — Arbitrary-time snapshots
 
-Status: **IMPLEMENTED / WAITING FOR MASTER**
+Status: **IMPLEMENTED / WAITING FOR CANONICAL MASTER**
 
-The user may safely pause and create a playable snapshot at any point after all 12,285 tasks have at least one persisted state.
+The user may safely pause and create a playable snapshot after all 12,285 tasks have at least one persisted state.
 
 Suggested labels:
 
-- `V1.1` around ~5 days;
-- `V1.2` around ~10 days;
+- `V1.1` at an early useful checkpoint;
+- `V1.2` later in the same trajectory;
 - `V2` at the 1,000-minimum completion gate.
 
-The day counts are not quality gates.
+The former ~5/~10/~15-day labels are no longer quality gates because optimized runtime may be much shorter.
 
 Each snapshot:
 
@@ -266,11 +331,18 @@ If action stability remains material at 1,000 visits, deepen the same trajectory
 
 # Immediate next gate
 
-Before starting the multi-day Ryzen run:
+On the Ryzen 9, with both continuous masters stopped:
 
-1. repository CI must be green;
-2. Ryzen must run `python C:\DeepPot\tools\check_deeppot_continuous_resume.py` and return PASS;
-3. confirm disk safety;
-4. then start `tools\run_deeppot_continuous.ps1`.
+```powershell
+cd C:\DeepPot
+git pull
+powershell -ExecutionPolicy Bypass -File .\tools\benchmark_deeppot_continuous_fast_v2_e2e.ps1
+```
+
+This uses 31 representative N=8 tasks and the real 50,000-iteration checkpoint size. It performs one fresh and one resumed wave, measures true end-to-end nodes/s including serialization/load, and estimates the iteration depth required for `visit_min ~1000` from measured visit minima.
+
+It writes only to `runs\kernel_benchmark_continuous_fast_v2_e2e` and does not touch either `continuous_master` or `continuous_master_fast_v2`.
+
+If this E2E gate is satisfactory, the next command will be the canonical long-run launcher `tools\run_deeppot_continuous_fast_v2.ps1`.
 
 ## ROADMAP CURRENT
