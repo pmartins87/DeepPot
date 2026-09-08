@@ -1,98 +1,88 @@
 # DeepPot Status
 
-Reference date: 2026-09-07
+Reference date: 2026-09-08
 
 ## Current direction
 
-DeepPot NLH Base v1 is now explicitly locked to the **same production methodology used for DeepKK**, adapted only for Pot Fold's larger postflop state space:
+DeepPot NLH Base v1 is locked to the **same production methodology used for DeepKK**, adapted only for Pot Fold's larger exact postflop state space:
 
-`enumerate all scenarios -> CFR+ -> linear average -> EV/CI confidence audit -> immutable mathematical TXT/CSV -> operational OpenHoldem -> runtime validation`
+`enumerate all scenarios -> CFR+ -> linear average -> EV/CI95 audit -> immutable exact lists -> operational OpenHoldem -> runtime validation`
 
 Authoritative decision: `docs/DEEPPOT_DEEPKK_METHOD_LOCK.md`.
 
-P4C..P4I remain preserved as research diagnostics but are no longer release blockers and will not be extended into a P4J/P4K ladder.
+P4C..P4I are archived research diagnostics and are no longer release blockers. P4I finished and failed its former N=4 gate; no P4J/P4K chain will follow.
 
-## Current completed foundation
+## Foundation complete
 
 - mechanics: complete;
-- economy: three live observations consistent with 2% gross-pot deduction; cap/profile variation still to freeze;
+- economy: three live observations consistent with 2% gross-pot deduction; cap/profile variation still unconfirmed;
 - exact game kernel: PASS;
-- exact state representation: PASS;
 - 1,755 canonical flops;
 - 1,286,792 exact canonical `(flop, hero hole)` states;
 - exact 2–8 player public action tree;
+- 494 explicit public decision scenarios;
 - CFR+ / linear-average solver implemented;
-- resumable multiprocessing production runner implemented;
-- measured throughput available for N=2..8;
-- DeepKK-style EV/CI evaluator implemented;
-- DeepKK-style mathematical TXT exporter implemented.
+- multiprocessing and resumable per-flop checkpoints implemented;
+- DeepKK-style EV/CI95 evaluator implemented;
+- compact lossless production audit implemented;
+- Windows/Ryzen production launcher implemented.
 
-## Scenario catalogue
+## Frozen DeepKK-parity production budget
 
-DeepPot enumerates every nonterminal public FOLD/STAY decision scenario, exactly following the DeepKK idea of explicit situations:
+The first full Ryzen run is now configured as:
 
-| N | scenarios |
-|---:|---:|
-| 2 | 2 |
-| 3 | 6 |
-| 4 | 14 |
-| 5 | 30 |
-| 6 | 62 |
-| 7 | 126 |
-| 8 | 254 |
-| **total** | **494** |
+- N=2 through N=8;
+- all 1,755 canonical flops;
+- seed 123;
+- CFR+ enabled;
+- linear averaging enabled;
+- **20,000 solver iterations per flop**;
+- **50,000 independent EV-audit samples per flop**;
+- minimum effective visits for an EV override: **25**;
+- confidence rule: `abs(EV_STAY-EV_FOLD) > CI95`;
+- inconclusive state: retain solver-average greedy action;
+- economy profile recorded explicitly as `provisional-2pct-uncapped` for the first run.
 
-`src/deeppot/deepkk_style_export.py` creates the canonical catalogue and one `STAY` list per scenario.
+Measured solve throughput implies about **127 aggregate CPU-hours** for the N=2..8 solve portion. The Ryzen 9 executes flops in parallel; audit and I/O add further wall time.
 
-## Mathematical source format
+## Exact output size and 494 lists
 
-Final `DeepPot.txt` will deliberately mirror DeepKK's organization:
+Across N=2..8 the final exact base contains **635,675,248 information-set decisions**.
 
-- `##notes##` provenance;
-- explicit modes/scenarios;
-- exactly **494 named STAY lists**;
-- absence from the current scenario's STAY list means FOLD;
-- each list entry is an exact postflop state token `F####_H####` rather than a 169 preflop class;
-- accompanying machine-readable CSV and SHA256 hashes.
+A literal TXT/CSV expansion would be multi-gigabyte and native OpenPPL handlists cannot represent flop-relative exact states anyway. Production therefore keeps the same DeepKK list semantics while storing membership losslessly as dense bitsets:
 
-Native OpenPPL handlists cannot encode a complete flop-relative exact state, so the immutable mathematical TXT keeps the list semantics while the operational layer compiles those lists to exact binary/DLL membership. This preserves the DeepKK mathematical-vs-operational separation rather than changing the strategic method.
+- `final`: final STAY/FOLD list membership;
+- `solver`: raw solver-average greedy membership;
+- `confident`: EV/CI confidence flag;
+- `low_coverage`: effective-visit flag.
 
-## DeepKK-style confidence rule now implemented
+`DeepPot.txt` still contains exactly **494 named STAY-list blocks**, one for every public scenario, and references the matching exact compiled list data. No state bucketing or approximation is introduced.
 
-`src/deeppot/deepkk_style_evaluator.py` evaluates every exact infoset with:
+## Production package
 
-- EV(FOLD);
-- EV(STAY);
-- EV gap;
-- standard error;
-- CI95;
-- effective visits / coverage;
-- solver-average probability.
+Ready files:
 
-Final action rule follows DeepKK:
+- `src/deeppot/deepkk_style_streaming.py`
+- `src/deeppot/deepkk_style_compact.py`
+- `src/deeppot/deepkk_style_export.py`
+- `tools/run_deeppot_ryzen.ps1`
+- `docs/RYZEN_DEEPKK_PARITY_RUN.md`
 
-1. if `abs(EV_STAY - EV_FOLD) > CI95` and coverage is sufficient, use the EV-best action;
-2. otherwise keep the solver-average greedy action;
-3. never invent a replacement action for an inconclusive state.
-
-This replaces the former universal `best-response <= 0.03 ante` release requirement.
+Regression CI confirms that the compact production audit yields the same final decisions as the row-form DeepKK-style EV/CI evaluator.
 
 ## Current active phase
 
-**P3 — unified DeepKK-style Ryzen generator/package: IN PROGRESS.**
+**P4 — official Ryzen mathematical-base run: READY TO START.**
 
-Remaining work before handing the official training package to the Ryzen 9:
+Command from the DeepPot repository on Windows:
 
-- combine solve + EV audit + final-strategy merge + `DeepPot.txt` export into one resumable command;
-- choose and record one finite native DeepPot training/evaluation budget using the already-measured throughput;
-- freeze economy/config/source hashes;
-- package Windows/Ryzen instructions.
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\run_deeppot_ryzen.ps1
+```
 
-After that, the official Ryzen run produces the mathematical Base, then work proceeds directly to operational OpenHoldem integration and finite shadow/live runtime checks.
+The run is restart-safe: executing the same command again resumes valid completed flop checkpoints.
 
-## Archived diagnostics
-
-P4C through P4I remain in the repository only for reproducibility/research comparison. Any already-running workflow from that branch is non-decision-relevant to the production route.
+After P4 completes, freeze the mathematical source/hashes and proceed directly to the DeepKK-like OpenHoldem operational layer.
 
 ## Useful remaining live economy evidence
 
@@ -100,4 +90,4 @@ For a clean Pot Fold payout observation capture:
 
 `players dealt | ante | table/stake label | FOLD/STAY sequence | gross terminal pot | amount awarded | net stack change | separate fee/rake line | jackpot/other fee if present`
 
-Highest-value remaining evidence is one reconstructable multiway hand and one relatively large pot to test whether a rake cap exists.
+Highest-value remaining evidence is one reconstructable multiway hand and one relatively large terminal pot to test whether a rake cap exists. This evidence does not block starting the provisional-profile Ryzen run.
