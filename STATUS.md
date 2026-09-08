@@ -4,17 +4,17 @@ Reference date: 2026-09-08
 
 ## Current direction
 
-DeepPot NLH Base v1 is locked to the **same production methodology used for DeepKK**, adapted only for Pot Fold's larger exact postflop state space:
+DeepPot NLH Base v1 remains locked to the **same production methodology used for DeepKK**, adapted only for Pot Fold's much larger exact postflop state space:
 
 `enumerate all scenarios -> CFR+ -> linear average -> EV/CI95 audit -> immutable exact lists -> operational OpenHoldem -> runtime validation`
 
 Authoritative decision: `docs/DEEPPOT_DEEPKK_METHOD_LOCK.md`.
 
-P4C..P4I are archived research diagnostics and are no longer release blockers. No P4J/P4K chain will follow.
+The current frozen Base v1 is now allowed to proceed to live **shadow mode** while a deeper statistical Base v2/audit campaign is prepared separately. Base v1 must not be overwritten.
 
-## P4 mathematical base — COMPUTE COMPLETED
+## P4 mathematical base — COMPLETE
 
-The official target-Ryzen run finished successfully with `RUN_MANIFEST.json stage=completed` using the frozen configuration:
+The official target-Ryzen run completed successfully in **22,598.7 s = 6.28 h** with:
 
 - N=2..8;
 - all 1,755 canonical flops per mode;
@@ -25,91 +25,117 @@ The official target-Ryzen run finished successfully with `RUN_MANIFEST.json stag
 - minimum effective visits 25;
 - confident EV-best else solver-average greedy fallback;
 - provisional economy `provisional-2pct-uncapped`;
-- **31 workers** selected by the frozen local benchmark.
+- 31 workers selected by the frozen local benchmark.
 
-Output root: `C:\DeepPot\runs\deepkk_parity_full`.
+Completed source-run SHA256:
 
-The completed mathematical run was then compiled successfully into the exact OpenHoldem runtime package. The runtime compiler verified `complete=true`, all 1,755 flops, N=2..8 exact bitset lengths/hashes and no strategic card abstraction.
-
-Recorded runtime provenance from the completed target-machine build:
-
-- source `RUN_MANIFEST.json` SHA256: `a1a05a6988ea937ec82a576c7cbf6c7ff2b03ceaa089e448dc3b4756322d5e14`;
-- runtime manifest SHA256: `907ce3470bc69c4245abf6e9ecc0f0c88742439af861e3fcf295bdaa7c010686`;
-- runtime index SHA256: `fb8bff8f21efd253ec6374de920de74d9fa662df673d5cd579f68fad152b6f74`.
+`a1a05a6988ea937ec82a576c7cbf6c7ff2b03ceaa089e448dc3b4756322d5e14`
 
 The exact strategy contains **635,675,248 information-set decisions** across N=2..8.
 
-One finite post-run task remains before declaring P4/P5 closed: review the already-produced per-mode confidence/coverage aggregates once and generate the P5 freeze manifest. `tools/freeze_deeppot_p5.ps1` now performs that check and hash freeze without rerunning the solver.
+### Final audit review
 
-## Worker benchmark — CLOSED
+| N | infosets | covered | low coverage | confident | confident / adequate | final STAY |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2 | 2,573,584 | 100% | 0.1602% | 66.3441% | 66.4506% | 80.4089% |
+| 3 | 7,720,752 | 100% | 10.3988% | 52.2670% | 58.3329% | 64.6348% |
+| 4 | 18,015,088 | 100% | 32.7921% | 37.4199% | 55.6777% | 53.3870% |
+| 5 | 38,603,760 | 100% | 50.9822% | 26.5572% | 54.1787% | 45.2988% |
+| 6 | 79,781,104 | 100% | 70.7244% | 15.7645% | 53.8487% | 39.7704% |
+| 7 | 162,135,792 | 100% | 84.2742% | 8.6108% | 54.7561% | 36.7355% |
+| 8 | 326,845,168 | 100% | 91.7877% | 4.6051% | 56.0760% | 36.7748% |
 
-| workers | wall seconds | jobs/min |
-|---:|---:|---:|
-| 15 | 93.6891 | 40.9866 |
-| 23 | 62.2139 | 61.7226 |
-| **31** | **61.8000** | **62.1359** |
+Totals:
 
-31 is frozen. No second worker tuning ladder.
+- covered at least once: **635,675,248 / 635,675,248 = 100.0000%**;
+- low coverage: **519,462,494 = 81.7182%**;
+- adequate coverage: **116,212,754 = 18.2818%**;
+- confident: **64,326,171 = 10.1193% of all states, 55.3521% of adequately covered states**;
+- final STAY: **245,651,878 = 38.6442%**;
+- confident EV overrides versus solver-average greedy: **8,307,288**.
 
-## Exact strategy representation
+Interpretation: low coverage refers to the independent EV/CI audit's effective-visit threshold, not missing CFR training states. Every supported state still has a final action; inconclusive/low-coverage states retain the solver-average greedy action. The high multiway low-coverage rate is the reason a deeper campaign will be prepared in parallel, without delaying Base v1 shadow validation.
 
-Final live membership is stored losslessly as dense bitsets: one bit per exact state, 1=STAY and 0=FOLD. Solver/confidence/low-coverage bitsets remain separately available for audit. No bucketing or strategic card abstraction is introduced.
+## P5 immutable freeze — COMPLETE
 
-Completed live runtime bitsets:
+Freeze manifest:
 
-| N | infosets | bytes | SHA256 |
-|---:|---:|---:|---|
-| 2 | 2,573,584 | 322,465 | `935521d94b04b9db39730ed350202a0a4c38c1f7f8944b848529dac1a4d60635` |
-| 3 | 7,720,752 | 965,354 | `9fef40253b5c1831aa9c6f28e696e8d2bf2449ec828ceb0255063ca73bc61328` |
-| 4 | 18,015,088 | 2,252,146 | `e03ef203157617d2c3817ee16d0d518a93780f07ba6fe6d5035c6cd54b6a3f17` |
-| 5 | 38,603,760 | 4,825,730 | `ce35794830eb61569c065d5ec929328a7a9e5155a04a6f1512fee3960f326fe6` |
-| 6 | 79,781,104 | 9,972,898 | `de7b538eaca26fcf73ad0b586f9ec99f446f22118d00dfc00bafaba62a1e8b8a` |
-| 7 | 162,135,792 | 20,267,234 | `f0b9c01d45a41baf1c1d469a68171406191206c48fd60d355d8f3b4ac954e9b7` |
-| 8 | 326,845,168 | 40,855,906 | `ae74e6b1a4733abf6a7260be0488480f5fc31b80cb510f5b0af7a3cc3ca8de75` |
+`C:\DeepPot\runs\p5_freeze\P5_FREEZE_MANIFEST.json`
 
-## P6 OpenHoldem — OFFLINE CORE IMPLEMENTED
+SHA256:
+
+`4d4077796ce81ec4d74a99818d69cc999221ad77c973c7d6fe7d4102d1a43a8a`
+
+Do not alter or delete:
+
+- `runs\deepkk_parity_full`;
+- `runs\deeppot_runtime`;
+- `runs\p5_freeze`.
+
+## Runtime package — COMPLETE
+
+Runtime provenance:
+
+- runtime manifest SHA256: `907ce3470bc69c4245abf6e9ecc0f0c88742439af861e3fcf295bdaa7c010686`;
+- runtime index SHA256: `fb8bff8f21efd253ec6374de920de74d9fa662df673d5cd579f68fad152b6f74`;
+- `complete=true`;
+- 1,755 canonical flops;
+- no strategic card abstraction.
+
+Final live membership is stored losslessly as one bit per exact state, 1=STAY and 0=FOLD.
+
+## P6 OpenHoldem — OFFLINE CORE IMPLEMENTED / LIVE SCRAPE VALIDATION NEXT
 
 Implemented:
 
-- `src/deeppot/runtime_contract.py`: one signed action/scenario code for all 494 scenarios;
-- `src/deeppot/runtime_package.py`: verifies and compiles completed mathematical output into the minimal live package;
-- `src/deeppot/openholdem_formula.py`: generates the DeepKK-like operational TXT with 494 explicit situations and logical STAY-list membership functions;
-- `runtime/deeppot_runtime_core.{h,cpp}`: portable C++ exact canonicalization/index/bit lookup;
-- `runtime/openholdem/deeppot_userdll.cpp`: OpenHoldem adapter with one `dll$deeppot_action`, deterministic HIT/MISS logs and fail-closed behavior;
-- `tools/build_deeppot_runtime.ps1`: completed successfully against the official run;
-- runtime suit normalization from OpenHoldem Clubs=1..Spades=4 to DeepPot c=0..s=3;
-- safe-disabled generated formula `C:\DeepPot\runs\deeppot_runtime\DeepPot_operational_DISABLED.txt`.
+- exact 494-scenario contract;
+- exact runtime index and N2..N8 final bitset loader;
+- exact 24-suit-permutation canonicalization and hole-state reconstruction in C++;
+- one `dll$deeppot_action` OpenHoldem adapter with deterministic HIT/MISS logging and fail-closed result 0;
+- OpenHoldem suit normalization 1..4 -> DeepPot 0..3;
+- DeepKK-like operational TXT generator;
+- successful Win32 Release `user.dll` build on VS2022/v143;
+- safe-disabled operational formula;
+- dedicated OpenHoldem branch `pmartins87/myoh_private:deeppot_runtime_v1`.
 
-Regression tests cover exact runtime scenario IDs, signed ±1..±494 codes, formula structure, mathematical-run -> runtime-package compilation and Python-reference versus C++ lookup on the same exact state.
-
-## Isolated OpenHoldem branch / user.dll
-
-Dedicated branch: `pmartins87/myoh_private:deeppot_runtime_v1`.
-
-The actual Win32 Release DeepPot `user.dll` build now **passes** on the VS2022/v143 runner. The successful binary SHA256 recorded by the build is:
+Successful `user.dll` SHA256:
 
 `0F939BAC4D5B3E95DCC219D0EC99CCB6FE4B12D97860FFAD5FA01A1E504C1FC9`
 
-The first VS2026 image failure was only a missing legacy ATL dependency; the compatible VS2022 build resolved it without changing DeepPot runtime semantics.
+Still live-dependent:
 
-## Remaining P6 facts that must come from the live table
+- validated Pot Fold tablemap/scraper;
+- KKPoker chair numbering and BTN/action-order orientation;
+- `playersdealtbits` / `playersplayingbits` / `foldbits2` agreement with actual prior FOLD/STAY history;
+- actual STAY/POT button action mapping.
 
-These are intentionally not guessed:
+## P7 mathematical -> runtime equivalence — PASS
 
-- Pot Fold tablemap/scraper;
-- actual KKPoker chair numbering and BTN/action-order orientation;
-- confirmation that `playersdealtbits`, `playersplayingbits` and `foldbits2` reproduce the binary prior FOLD/STAY history correctly;
-- actual OpenHoldem action/button mapping that pays the fixed Pot Fold STAY amount.
+Local exhaustive gate result:
 
-`BetPot` remains only a syntactically valid **disabled placeholder**. `f$deeppot_live_enabled=false` stays frozen until those items pass shadow validation.
+`C:\DeepPot\runs\p7_equivalence\P7_EQUIVALENCE_RESULT.json`
 
-## Immediate next gate
+PASS facts:
 
-1. run `tools/freeze_deeppot_p5.ps1` once on the completed local outputs;
-2. record the per-mode confidence/coverage result and P5 freeze-manifest SHA;
-3. perform the single P7 exhaustive mathematical-to-runtime key/equivalence gate;
-4. then move to live tablemap/state-recognition validation;
-5. exactly 200 shadow decisions;
-6. exactly 200 smallest-stake live autoplayer decisions.
+- structurally resolvable infosets: **635,675,248 / 635,675,248**;
+- unknown supported keys: **0**;
+- action bit mismatches: **0**;
+- index metadata mismatches: **0**;
+- source/runtime final SHA256 identical for every N=2..8.
 
-No new solver-method ladder is planned.
+The gate matches all 1,755 source flop records per N to the runtime canonical flop codes and hole-state widths, accounts for every infoset, and XOR-compares the final source/runtime action vectors byte-for-byte. Python-vs-compiled-C++ exact canonicalization/query parity is separately regression-tested.
+
+## P8 shadow mode — PREPARATION IN PROGRESS
+
+A dedicated **no-action** shadow formula and one-command package builder have been added:
+
+- `src/deeppot/openholdem_shadow_formula.py`;
+- `tools/prepare_deeppot_shadow.ps1`.
+
+The generated `DeepPot_SHADOW_SAFE.txt` contains no Fold/Call/Bet/Raise/Allin action command. It queries `dll$deeppot_action` only through OpenHoldem's `f$debug` tab. With Autoplayer OFF and Debug -> Auto enabled, OpenHoldem evaluates the recommendation once per heartbeat while the DLL writes `[DeepPot] HIT/MISS` records.
+
+P8 acceptance remains exactly **200 consecutive valid decisions** after tablemap/state recognition is validated.
+
+## Parallel deeper strategy work
+
+Base v1 remains frozen and proceeds to shadow/live validation. In parallel, a deeper statistical campaign may increase independent EV-audit sampling and use a substantially stronger effective-visit threshold, closer in spirit to the DeepKK final audit. Any such output is a separate Base v2 candidate and may not mutate Base v1.
