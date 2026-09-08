@@ -28,11 +28,11 @@ $totalOverrides = [int64]0
 foreach ($n in 2..8) {
     $summaryPath = Join-Path $RunDir "N$n\audit_summary.json"
     if (-not (Test-Path $summaryPath)) {
-        throw "audit_summary ausente para N=$n: $summaryPath"
+        throw "audit_summary ausente para N=${n}: $summaryPath"
     }
     $summaries = @(Get-Content $summaryPath -Raw | ConvertFrom-Json)
     if ($summaries.Count -ne 1755) {
-        throw "N=$n audit_summary deveria ter 1755 flops, mas tem $($summaries.Count)"
+        throw "N=${n} audit_summary deveria ter 1755 flops, mas tem $($summaries.Count)"
     }
 
     $infosets = [int64]0
