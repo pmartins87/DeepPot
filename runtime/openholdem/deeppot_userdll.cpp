@@ -76,10 +76,12 @@ bool EnsureStrategyLoaded(std::string* error) {
 
 bool ReadCard(const char* rank_symbol, const char* suit_symbol, deeppot_runtime::Card* out) {
   const int rank = IntSymbol(rank_symbol);
-  const int suit = IntSymbol(suit_symbol);
-  if (rank < 2 || rank > 14 || suit < 0 || suit > 3) return false;
+  const int openholdem_suit = IntSymbol(suit_symbol);
+  // OpenHoldem card-suit symbols use Clubs=1, Diamonds=2, Hearts=3, Spades=4.
+  // DeepPot's exact-state engine uses the zero-based order c=0,d=1,h=2,s=3.
+  if (rank < 2 || rank > 14 || openholdem_suit < 1 || openholdem_suit > 4) return false;
   out->rank = rank;
-  out->suit = suit;
+  out->suit = openholdem_suit - 1;
   return true;
 }
 
