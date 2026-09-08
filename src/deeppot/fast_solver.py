@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
 
 from .cards import Card
 from .evaluator import evaluate_seven
@@ -113,9 +112,10 @@ class FastChanceSampledCFR(ChanceSampledCFR):
                 future_mask = all_mask & ~((1 << actor) - 1)
                 active_mask = bits | future_mask
 
-                # FOLD branch.
+                # FOLD branch. Any BTN action is terminal because there is no
+                # later actor, even when multiple prior STAY players remain.
                 fold_active = active_mask & ~(1 << actor)
-                if fold_active.bit_count() <= 1:
+                if actor == self.num_players - 1 or fold_active.bit_count() <= 1:
                     fold_child[sid] = terminal_desc(fold_active, bits)
                 else:
                     fold_child[sid] = self._sid(self.num_players, actor + 1, bits)
