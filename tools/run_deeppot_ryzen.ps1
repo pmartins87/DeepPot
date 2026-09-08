@@ -11,10 +11,25 @@ if ([string]::IsNullOrWhiteSpace($OutDir)) {
 }
 
 $logical = [Environment]::ProcessorCount
+$workerSource = "explicit -Workers"
 if ($Workers -le 0) {
-    # Ryzen SMT normalmente expõe 2 threads por core. O solver usa processos por flop;
-    # por padrão usamos aproximadamente os cores físicos menos um, evitando oversubscription.
-    $Workers = [Math]::Max(1, [Math]::Floor($logical / 2) - 1)
+    $selectedPath = Join-Path $RepoRoot "runs\worker_benchmark\selected_workers.txt"
+    if (Test-Path $selectedPath) {
+        $selectedText = (Get-Content $selectedPath -Raw).Trim()
+        $selectedValue = 0
+        if ([int]::TryParse($selectedText, [ref]$selectedValue) -and $selectedValue -ge 1 -and $selectedValue -le $logical) {
+            $Workers = $selectedValue
+            $workerSource = "finite local worker benchmark"
+        } else {
+            throw "Arquivo de benchmark inválido: $selectedPath"
+        }
+    } else {
+        # DeepKK official Ryzen runs used cpu_count-1 = 31 on the 32-logical-thread host.
+        # This is the fallback only. The recommended path is to run the one-pass
+        # DeepPot worker benchmark first, because DeepPot parallelizes by flop.
+        $Workers = [Math]::Max(1, $logical - 1)
+        $workerSource = "DeepKK-parity fallback logical-1 (benchmark file not found)"
+    }
 }
 
 $python = $null
@@ -58,6 +73,7 @@ if ($Smoke) {
     Write-Host "  50,000 EV/CI95 audit samples por flop | min effective visits 25"
     Write-Host "  provisional economy: 2% rake, uncapped"
     Write-Host "  workers: $Workers (logical processors detected: $logical)"
+    Write-Host "  worker source: $workerSource"
     Write-Host "  output: $OutDir"
     Write-Host "  RESTART SAFE: execute o mesmo comando novamente para retomar checkpoints."
 
