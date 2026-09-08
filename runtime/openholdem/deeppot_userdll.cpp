@@ -162,18 +162,31 @@ bool BuildRuntimeQuery(
     return false;
   }
 
+  // KKPoker Pot Fold does not reliably retain foldbits2 for every prior actor
+  // after the folded cardback disappears. In this one-decision game every dealt
+  // PRIOR actor has already chosen exactly one action, so playersplayingbits is
+  // the primary state signal: still holding cards = STAY; no longer holding
+  // cards = FOLD. foldbits2 remains a consistency check when present.
   std::uint32_t stay_mask = 0;
+  std::uint32_t inferred_fold_mask = 0;
   for (int i = 0; i < actor; ++i) {
     const unsigned int bit = 1u << order[i];
     const bool is_folded = (folded & bit) != 0;
     const bool is_playing = (playing & bit) != 0;
-    // In this one-decision game a prior actor must be exactly one of:
-    // FOLD -> folded and no longer playing; STAY -> not folded and still playing.
-    if (is_folded == is_playing) {
-      if (error) *error = "ambiguous prior FOLD/STAY scrape";
+    if (is_folded && is_playing) {
+      if (error) *error = "prior actor simultaneously playing and folded";
       return false;
     }
-    if (is_playing) stay_mask |= (1u << i);
+    if (is_playing) {
+      stay_mask |= (1u << i);
+    } else if (!is_folded) {
+      inferred_fold_mask |= (1u << i);
+    }
+  }
+  if (inferred_fold_mask != 0) {
+    WriteLog(
+        "[DeepPot] INFO prior FOLD inferred from playersplayingbits actor_mask=0x%X; foldbits2 incomplete\n",
+        inferred_fold_mask);
   }
 
   if (!ReadCard("$$pr0", "$$ps0", &(*hole)[0]) ||
