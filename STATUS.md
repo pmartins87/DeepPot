@@ -4,61 +4,37 @@ Reference date: 2026-09-08
 
 ## Current direction
 
-DeepPot NLH Base v1 remains locked to the **same production methodology used for DeepKK**, adapted only for Pot Fold's much larger exact postflop state space:
+DeepPot has two deliberately separate tracks:
 
-`enumerate all scenarios -> CFR+ -> linear average -> EV/CI95 audit -> immutable exact lists -> operational OpenHoldem -> runtime validation`
+1. **Base v1 frozen / live operational testing** — already solved, compiled and running on the i5 through OpenHoldem; never overwrite it.
+2. **Continuous deep CFR track** — runs on the Ryzen 9, starts a new resumable trajectory and targets at least **1,000 actual training visits for every exact infoset**.
 
-Authoritative decision: `docs/DEEPPOT_DEEPKK_METHOD_LOCK.md`.
+The DeepKK-parity principle remains authoritative: preserve the exact game/scenario space, CFR+ and linear averaging. The deeper track changes training depth/checkpointing, not the strategic abstraction.
 
-The current frozen Base v1 is now allowed to proceed to live **shadow mode** while a deeper statistical Base v2/audit campaign is prepared separately. Base v1 must not be overwritten.
+Detailed continuous-training policy: `docs/CONTINUOUS_TRAINING_V2.md`.
 
-## P4 mathematical base — COMPLETE
+## Base v1 mathematical source — COMPLETE / FROZEN
 
-The official target-Ryzen run completed successfully in **22,598.7 s = 6.28 h** with:
+Official Ryzen run:
 
 - N=2..8;
 - all 1,755 canonical flops per mode;
+- 494 public scenarios;
+- 635,675,248 exact infosets;
 - seed 123;
 - CFR+ + linear average;
-- 20,000 solver iterations/flop;
-- 50,000 independent EV-audit samples/flop;
-- minimum effective visits 25;
-- confident EV-best else solver-average greedy fallback;
-- provisional economy `provisional-2pct-uncapped`;
-- 31 workers selected by the frozen local benchmark.
+- 20,000 solver iterations per flop;
+- 50,000 independent EV-audit samples per flop;
+- audit minimum effective visits 25;
+- provisional 2% uncapped rake;
+- 31 workers;
+- elapsed **22,598.7 s = 6.28 h**.
 
-Completed source-run SHA256:
+Source run manifest SHA256:
 
 `a1a05a6988ea937ec82a576c7cbf6c7ff2b03ceaa089e448dc3b4756322d5e14`
 
-The exact strategy contains **635,675,248 information-set decisions** across N=2..8.
-
-### Final audit review
-
-| N | infosets | covered | low coverage | confident | confident / adequate | final STAY |
-|---:|---:|---:|---:|---:|---:|---:|
-| 2 | 2,573,584 | 100% | 0.1602% | 66.3441% | 66.4506% | 80.4089% |
-| 3 | 7,720,752 | 100% | 10.3988% | 52.2670% | 58.3329% | 64.6348% |
-| 4 | 18,015,088 | 100% | 32.7921% | 37.4199% | 55.6777% | 53.3870% |
-| 5 | 38,603,760 | 100% | 50.9822% | 26.5572% | 54.1787% | 45.2988% |
-| 6 | 79,781,104 | 100% | 70.7244% | 15.7645% | 53.8487% | 39.7704% |
-| 7 | 162,135,792 | 100% | 84.2742% | 8.6108% | 54.7561% | 36.7355% |
-| 8 | 326,845,168 | 100% | 91.7877% | 4.6051% | 56.0760% | 36.7748% |
-
-Totals:
-
-- covered at least once: **635,675,248 / 635,675,248 = 100.0000%**;
-- low coverage: **519,462,494 = 81.7182%**;
-- adequate coverage: **116,212,754 = 18.2818%**;
-- confident: **64,326,171 = 10.1193% of all states, 55.3521% of adequately covered states**;
-- final STAY: **245,651,878 = 38.6442%**;
-- confident EV overrides versus solver-average greedy: **8,307,288**.
-
-Interpretation: low coverage refers to the independent EV/CI audit's effective-visit threshold, not missing CFR training states. Every supported state still has a final action; inconclusive/low-coverage states retain the solver-average greedy action. The high multiway low-coverage rate is the reason a deeper campaign will be prepared in parallel, without delaying Base v1 shadow validation.
-
-## P5 immutable freeze — COMPLETE
-
-Freeze manifest:
+P5 freeze manifest:
 
 `C:\DeepPot\runs\p5_freeze\P5_FREEZE_MANIFEST.json`
 
@@ -66,76 +42,124 @@ SHA256:
 
 `4d4077796ce81ec4d74a99818d69cc999221ad77c973c7d6fe7d4102d1a43a8a`
 
-Do not alter or delete:
+Never alter/delete:
 
 - `runs\deepkk_parity_full`;
 - `runs\deeppot_runtime`;
 - `runs\p5_freeze`.
 
-## Runtime package — COMPLETE
+## Base v1 depth/audit interpretation
 
-Runtime provenance:
+The full CFR tree traversal generated about 17.34 billion node visits, but across the 635.7 million exact infosets this is only about **27.28 training visits per infoset on average**.
 
-- runtime manifest SHA256: `907ce3470bc69c4245abf6e9ecc0f0c88742439af861e3fcf295bdaa7c010686`;
-- runtime index SHA256: `fb8bff8f21efd253ec6374de920de74d9fa662df673d5cd579f68fad152b6f74`;
-- `complete=true`;
-- 1,755 canonical flops;
-- no strategic card abstraction.
+Audit outcome:
 
-Final live membership is stored losslessly as one bit per exact state, 1=STAY and 0=FOLD.
+| N | infosets | low coverage | confident | final STAY |
+|---:|---:|---:|---:|---:|
+| 2 | 2,573,584 | 0.1602% | 66.3441% | 80.4089% |
+| 3 | 7,720,752 | 10.3988% | 52.2670% | 64.6348% |
+| 4 | 18,015,088 | 32.7921% | 37.4199% | 53.3870% |
+| 5 | 38,603,760 | 50.9822% | 26.5572% | 45.2988% |
+| 6 | 79,781,104 | 70.7244% | 15.7645% | 39.7704% |
+| 7 | 162,135,792 | 84.2742% | 8.6108% | 36.7355% |
+| 8 | 326,845,168 | 91.7877% | 4.6051% | 36.7748% |
 
-## P6 OpenHoldem — OFFLINE CORE IMPLEMENTED / LIVE SCRAPE VALIDATION NEXT
+Totals:
 
-Implemented:
+- covered at least once in audit: 100.0000%;
+- low audit coverage: **81.7182%**;
+- confident: **10.1193% of all states / 55.3521% of adequately covered states**;
+- final STAY: **38.6442%**;
+- confident EV overrides: **8,307,288**.
 
-- exact 494-scenario contract;
-- exact runtime index and N2..N8 final bitset loader;
-- exact 24-suit-permutation canonicalization and hole-state reconstruction in C++;
-- one `dll$deeppot_action` OpenHoldem adapter with deterministic HIT/MISS logging and fail-closed result 0;
-- OpenHoldem suit normalization 1..4 -> DeepPot 0..3;
-- DeepKK-like operational TXT generator;
-- successful Win32 Release `user.dll` build on VS2022/v143;
-- safe-disabled operational formula;
-- dedicated OpenHoldem branch `pmartins87/myoh_private:deeppot_runtime_v1`.
+Low audit coverage does not mean missing strategy: every supported state has a final action, with inconclusive states using the greedy linear-average CFR action. It does mean Base v1 is materially shallower per exact state than DeepKK.
 
-Successful `user.dll` SHA256:
-
-`0F939BAC4D5B3E95DCC219D0EC99CCB6FE4B12D97860FFAD5FA01A1E504C1FC9`
-
-Still live-dependent:
-
-- validated Pot Fold tablemap/scraper;
-- KKPoker chair numbering and BTN/action-order orientation;
-- `playersdealtbits` / `playersplayingbits` / `foldbits2` agreement with actual prior FOLD/STAY history;
-- actual STAY/POT button action mapping.
+DeepKK official comparison: 20,000 iterations x 24,000 deals/iteration = 480 million deals per mode, and its official EV audit used `min_visits=5000`. The 25-visit value existed only in the quick preset.
 
 ## P7 mathematical -> runtime equivalence — PASS
 
-Local exhaustive gate result:
-
 `C:\DeepPot\runs\p7_equivalence\P7_EQUIVALENCE_RESULT.json`
 
-PASS facts:
-
-- structurally resolvable infosets: **635,675,248 / 635,675,248**;
+- structurally resolvable: **635,675,248 / 635,675,248**;
 - unknown supported keys: **0**;
 - action bit mismatches: **0**;
 - index metadata mismatches: **0**;
-- source/runtime final SHA256 identical for every N=2..8.
+- source/runtime final SHA256 identical for N2..N8.
 
-The gate matches all 1,755 source flop records per N to the runtime canonical flop codes and hole-state widths, accounts for every infoset, and XOR-compares the final source/runtime action vectors byte-for-byte. Python-vs-compiled-C++ exact canonicalization/query parity is separately regression-tested.
+## OpenHoldem live runtime — TESTING ON i5
 
-## P8 shadow mode — PREPARATION IN PROGRESS
+Machine roles are the same pattern used for DeepKK:
 
-A dedicated **no-action** shadow formula and one-command package builder have been added:
+- **Ryzen 9:** solver/build/deep training;
+- **i5:** KKPoker + OpenHoldem live tests.
 
-- `src/deeppot/openholdem_shadow_formula.py`;
-- `tools/prepare_deeppot_shadow.ps1`.
+Implemented runtime:
 
-The generated `DeepPot_SHADOW_SAFE.txt` contains no Fold/Call/Bet/Raise/Allin action command. It queries `dll$deeppot_action` only through OpenHoldem's `f$debug` tab. With Autoplayer OFF and Debug -> Auto enabled, OpenHoldem evaluates the recommendation once per heartbeat while the DLL writes `[DeepPot] HIT/MISS` records.
+- one `dll$deeppot_action` contract for all 494 scenarios;
+- exact bit lookup; no live solver/equity calculation;
+- exact flop/hole canonicalization;
+- lossless N2..N8 final bitsets;
+- fail-closed return 0;
+- deterministic HIT/MISS logs.
 
-P8 acceptance remains exactly **200 consecutive valid decisions** after tablemap/state recognition is validated.
+Live corrections already made:
 
-## Parallel deeper strategy work
+- OpenHoldem/PokerEval suit encoding corrected from H=0,D=1,C=2,S=3 to DeepPot C=0,D=1,H=2,S=3 via mapping `[2,1,0,3]`;
+- prior FOLD/STAY reconstruction corrected so a prior actor missing from `playersplayingbits` is interpreted as FOLD even when KKPoker/OpenHoldem does not preserve the corresponding `foldbits2` bit; contradictory playing+folded state still fails closed.
 
-Base v1 remains frozen and proceeds to shadow/live validation. In parallel, a deeper statistical campaign may increase independent EV-audit sampling and use a substantially stronger effective-visit threshold, closer in spirit to the DeepKK final audit. Any such output is a separate Base v2 candidate and may not mutate Base v1.
+Live tests showed coherent HIT decisions overall. Suspicious individual actions remain eligible for targeted mathematical inspection. `negative potcommon`/some scraper warnings remain tablemap concerns and are separate from exact DeepPot lookup when required state symbols are valid.
+
+## Continuous deep CFR track — INFRASTRUCTURE IMPLEMENTED, PRE-RUN GATE
+
+Target:
+
+> **every exact infoset `visit_count >= 1000`**.
+
+This is a real depth target, not “run for 15 days”. `1000` is a pragmatic first target, not a theorem. If the policy remains materially unstable at 1,000, the same master continues deeper instead of restarting.
+
+Implemented:
+
+- `ChanceSampledCFR.continue_solve(...)` preserving global linear-average iteration numbering;
+- persistent atomic per-task `.dpcfr` state with regrets, strategy sums, visit counts, completed iterations and RNG state;
+- exact source/config provenance lock;
+- 12,285 tasks (N2..N8 × 1,755 flops), interleaved by flop;
+- default 50,000-iteration checkpoint chunks;
+- 31-worker launcher using the frozen benchmark;
+- graceful Ctrl+C pause: stop new chunks, drain active chunks, checkpoint, print `SAFE TO CLOSE`;
+- exact same-command resume;
+- progress manifest and read-only status command;
+- arbitrary-time snapshot exporter;
+- dependency-free exact-resume smoke test;
+- policy stability comparison between snapshots by XOR over all 635,675,248 action bits.
+
+Persistent-state payload estimate: **~21.31 GiB** plus headers/summaries/snapshots. Initial free-space safety floor is 30 GiB; resumed sessions use a 2 GiB working-space floor after the fixed-size state starts materializing.
+
+### Snapshot plan
+
+Suggested labels only:
+
+- `V1.1` around ~5 days;
+- `V1.2` around ~10 days;
+- `V2` when all exact infosets reach the configured 1,000 minimum.
+
+A snapshot does not consume or reset training. It creates current exact runtime bitsets + `DeepPot_<snapshot>.txt` and records visit-depth metrics and action changes versus the previous snapshot. The master can then resume from the same CFR/RNG state.
+
+### Audit policy for the deep track
+
+No mandatory global EV/CI audit is appended to every deep snapshot. Validation is based on:
+
+- actual visit depth;
+- preserved regrets/linear-average sums;
+- near-50/50 average-policy fraction;
+- cross-snapshot policy stability globally/per N.
+
+Independent EV audit remains available as a targeted diagnostic for questionable states.
+
+## Immediate gate before long Ryzen run
+
+Do **not** start the multi-day master until:
+
+1. repository CI is green;
+2. `python C:\DeepPot\tools\check_deeppot_continuous_resume.py` passes on the Ryzen;
+3. disk safety check passes;
+4. Base v1 frozen artifacts remain untouched.
