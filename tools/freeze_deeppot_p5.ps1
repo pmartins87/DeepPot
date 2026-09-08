@@ -85,7 +85,10 @@ foreach ($n in 2..8) {
     $totalStay += $stay
     $totalOverrides += $overrides
 
-    $rows.Add([ordered]@{
+    # PSCustomObject is required for reliable Format-Table output on Windows
+    # PowerShell 5.1. OrderedDictionary alone serialized correctly but rendered
+    # as blank rows in the user's stock console.
+    $rows.Add([pscustomobject][ordered]@{
         N = $n
         flops = 1755
         infosets = $expected
