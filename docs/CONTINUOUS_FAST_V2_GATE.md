@@ -2,6 +2,8 @@
 
 Reference date: 2026-09-08
 
+Status: **CLOSED / FAST V2 APPROVED FOR CANONICAL DEEP TRAINING**
+
 ## Accepted facts from the Ryzen benchmarks
 
 The original exact Python CFR kernel baseline on representative flop 877 was:
@@ -26,7 +28,7 @@ Ryzen N=8 parallel scaling for fast-v1, 62 tasks x 3,000 iterations:
 
 **31 workers remains the winner.**
 
-## Fast-v2 accepted as the Python production candidate
+## Fast-v2 accepted as the Python production kernel
 
 `src/deeppot/fast_solver_v2.py` removes only redundant reach-vector bookkeeping from the strictly sequential one-decision-per-player Pot Fold tree. It carries the ordered product of prior action probabilities as one scalar. The chance trajectory, infoset keys, FOLD-before-STAY traversal, CFR+ regrets, global linear averaging and terminal utilities remain unchanged.
 
@@ -57,59 +59,91 @@ Fast-v2 31-worker N=8 parallel check, 62 tasks:
 - task mean: 2.956 s;
 - task max: 3.027 s.
 
-This is an additional ~13% N=8 gain on top of fast-v1 and is material because N=8 dominates the exact state space. Fast-v2 is therefore the accepted Python kernel candidate for the canonical continuous master.
+Fast-v2 is therefore the accepted kernel for the canonical continuous master.
 
-## Canonical fast-v2 continuous infrastructure
+## Final end-to-end Ryzen gate — PASS
 
-The paused pilot root remains preserved:
+Canonical E2E benchmark:
 
-`C:\DeepPot\runs\continuous_master`
+- workers: 31;
+- representative tasks: 31 N=8 flops;
+- canonical chunk: 50,000 iterations;
+- wave 1: fresh train + atomic state/greedy/summary checkpoint;
+- wave 2: load persisted CFR/RNG + continue + atomic replacement checkpoint.
 
-It stopped safely at weighted mean visits 1.90 and must not be mixed with the optimized trajectory.
+Measured result:
 
-The optimized canonical root is intentionally separate:
+### Fresh 50k wave
 
-`C:\DeepPot\runs\continuous_master_fast_v2`
+- wall: **48.138 s**;
+- effective throughput: **8,178,639 decision nodes/s**;
+- visit-min across the 31 N=8 tasks: **23 / 23 / 26** (min/median/max);
+- median visit mean: **69.35**;
+- persistent state written: **184.7 MiB**.
 
-New source-locked components:
+### Resumed +50k wave
 
-- `src/deeppot/continuous_training_fast_v2.py` — persistent fast-v2 state, atomic checkpoint, exact RNG resume and visit statistics;
-- `src/deeppot/continuous_runner_fast_v2.py` — hardened 31-worker interruptible runner;
-- `tools/run_deeppot_continuous_fast_v2.ps1` — canonical one-command launcher;
-- `tests/test_continuous_fast_v2_resume.py` — persistent checkpoint/load/continue exactness test.
+- wall: **50.284 s**;
+- effective throughput including load/checkpoint: **7,829,525 decision nodes/s**;
+- visit-min across the 31 N=8 tasks: **54 / 55 / 60** (min/median/max);
+- median visit mean: **138.70**;
+- persistent state: **184.7 MiB**.
 
-The original pilot modules and root remain available for traceability.
+### Projection to the 1,000-minimum gate
 
-## Final end-to-end gate before the multi-day run
+From measured visit minima after 100,000 iterations:
 
-Compute-only benchmarks do not include loading, dense-state scan, serialization, fsync and atomic file replacement. Therefore one final short Ryzen gate is mandatory before launching the canonical 1000-min-visit master:
+- representative median projection: **1,818,182 iterations**;
+- conservative representative projection from the worst of the 31 N=8 flops: **1,851,852 iterations**;
+- rough all-N/all-flop compute projection using resumed E2E throughput: **~57.0 hours**.
+
+This projection is only planning guidance. The canonical trainer does **not** stop by elapsed time or a hard iteration count. It stops only when every exact infoset has measured `visit_count >= 1000`.
+
+## Engineering decision after the E2E gate
+
+The E2E runtime is reasonable for the project objective. Therefore:
+
+- **do not implement C++ now**;
+- stop performance micro-optimization;
+- launch the canonical fast-v2 trajectory from iteration 1;
+- preserve the old `runs\\continuous_master` pilot untouched;
+- use only `runs\\continuous_master_fast_v2` for the canonical V1.1 -> V1.2 -> V2 lineage;
+- keep 31 workers and 50,000-iteration atomic chunks;
+- continue beyond 1,000 later, if desired, by raising only `TargetMinVisits`; do not restart the trajectory.
+
+The decision prioritizes poker-training depth and useful compute over engineering complexity that is no longer justified by expected wall-clock savings.
+
+## Canonical continuous infrastructure
+
+Paused pilot root, preserved for traceability:
+
+`C:\\DeepPot\\runs\\continuous_master`
+
+Canonical optimized root:
+
+`C:\\DeepPot\\runs\\continuous_master_fast_v2`
+
+Canonical launcher:
 
 ```powershell
-cd C:\DeepPot
-git pull
-powershell -ExecutionPolicy Bypass -File .\tools\benchmark_deeppot_continuous_fast_v2_e2e.ps1
+powershell -ExecutionPolicy Bypass -File C:\\DeepPot\\tools\\run_deeppot_continuous_fast_v2.ps1
 ```
 
-This benchmark uses 31 representative N=8 flop tasks and the real canonical 50,000-iteration checkpoint size. It executes:
+Canonical status helper:
 
-1. a fresh 50k wave including state/greedy/summary checkpoint;
-2. a resumed 50k wave including persisted CFR/RNG load and atomic replacement checkpoint.
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\\DeepPot\\tools\\status_deeppot_continuous_fast_v2.ps1
+```
 
-It reports actual end-to-end nodes/s, visit-min distribution after 100k iterations and a rough runtime projection to min_visit ~1000. It writes only under:
+Canonical snapshot helper:
 
-`C:\DeepPot\runs\kernel_benchmark_continuous_fast_v2_e2e`
-
-and does not touch either continuous master.
-
-## C++ decision rule
-
-Do **not** implement a native C++ rewrite by default. Fast-v2 already reaches ~6.42 million N=8 decision nodes/s in the short 31-worker scaling test. Native work is justified only if the end-to-end gate shows that the true 1000-min-visit runtime remains operationally expensive enough to outweigh implementation and equivalence-validation cost.
-
-If the E2E runtime is reasonable, stop performance work and launch fast-v2. This follows the project rule: maximize poker quality and useful compute, not engineering complexity for its own sake.
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\\DeepPot\\tools\\snapshot_deeppot_continuous_fast_v2.ps1 -Name V1.1
+```
 
 ## Canonical master rules
 
-The final canonical trajectory must retain:
+The canonical trajectory must retain:
 
 - all 635,675,248 exact infosets;
 - all 1,755 canonical flops and 494 public scenarios;
@@ -120,4 +154,9 @@ The final canonical trajectory must retain:
 - persistent regrets, strategy sums, visit counts and RNG;
 - graceful Ctrl+C pause and exact resume;
 - arbitrary V1.1/V1.2/V2 snapshots without consuming or restarting the master;
+- no mandatory global EV/CI audit; targeted audit remains available;
 - optional continuation beyond 1,000 by changing only the stop target.
+
+## Source-lock rule once canonical training starts
+
+After the canonical root has been created, do not alter mathematical training source files on that Ryzen trajectory. Documentation-only repository updates are harmless, but any change to files covered by the training source hash must not be mixed into the active master. If mathematical code ever must change, pause safely and evaluate migration explicitly rather than silently resuming incompatible state.
