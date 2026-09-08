@@ -9,9 +9,14 @@ DeepPot has two deliberately separate tracks:
 1. **Base v1 frozen / live operational testing** — already solved, compiled and running on the i5 through OpenHoldem; never overwrite it.
 2. **Continuous deep CFR track** — runs on the Ryzen 9, starts a new resumable trajectory and targets at least **1,000 actual training visits for every exact infoset**.
 
-The DeepKK-parity principle remains authoritative: preserve the exact game/scenario space, CFR+ and linear averaging. The deeper track changes training depth/checkpointing, not the strategic abstraction.
+The DeepKK-parity principle remains authoritative: preserve the exact game/scenario space, CFR+ and linear averaging. The deeper track changes training depth/checkpointing and implementation efficiency, not the strategic abstraction.
 
-Detailed continuous-training policy: `docs/CONTINUOUS_TRAINING_V2.md`.
+Authoritative documents:
+
+- `docs/CONTINUOUS_TRAINING_V2.md`;
+- `docs/CONTINUOUS_PERFORMANCE_GATE.md`;
+- `docs/CONTINUOUS_FAST_V2_GATE.md`;
+- `docs/CONTINUOUS_TRAINING_POST1000.md`.
 
 ## Base v1 mathematical source — COMPLETE / FROZEN
 
@@ -109,57 +114,113 @@ Live corrections already made:
 
 Live tests showed coherent HIT decisions overall. Suspicious individual actions remain eligible for targeted mathematical inspection. `negative potcommon`/some scraper warnings remain tablemap concerns and are separate from exact DeepPot lookup when required state symbols are valid.
 
-## Continuous deep CFR track — INFRASTRUCTURE IMPLEMENTED, PRE-RUN GATE
+## Continuous deep CFR track — RESUMABLE INFRASTRUCTURE COMPLETE
 
 Target:
 
 > **every exact infoset `visit_count >= 1000`**.
 
-This is a real depth target, not “run for 15 days”. `1000` is a pragmatic first target, not a theorem. If the policy remains materially unstable at 1,000, the same master continues deeper instead of restarting.
+This is a real depth target, not “run for 15 days”. `1000` is a pragmatic first target, not a theorem. If the policy remains materially unstable at 1,000, the same master continues deeper by raising only the stop target.
 
-Implemented:
+Core properties:
 
-- `ChanceSampledCFR.continue_solve(...)` preserving global linear-average iteration numbering;
-- persistent atomic per-task `.dpcfr` state with regrets, strategy sums, visit counts, completed iterations and RNG state;
+- persistent atomic per-task state with regrets, strategy sums, visit counts, completed iterations and RNG;
 - exact source/config provenance lock;
 - 12,285 tasks (N2..N8 × 1,755 flops), interleaved by flop;
 - default 50,000-iteration checkpoint chunks;
-- 31-worker launcher using the frozen benchmark;
-- graceful Ctrl+C pause: stop new chunks, drain active chunks, checkpoint, print `SAFE TO CLOSE`;
-- exact same-command resume;
-- progress manifest and read-only status command;
-- arbitrary-time snapshot exporter;
-- dependency-free exact-resume smoke test;
-- policy stability comparison between snapshots by XOR over all 635,675,248 action bits.
+- graceful Ctrl+C pause and `SAFE TO CLOSE`;
+- exact resume;
+- arbitrary-time snapshot export;
+- cross-snapshot exact action-bit stability comparison;
+- no mandatory global EV/CI audit on the deep track; targeted audit remains available.
 
-Persistent-state payload estimate: **~21.31 GiB** plus headers/summaries/snapshots. Initial free-space safety floor is 30 GiB; resumed sessions use a 2 GiB working-space floor after the fixed-size state starts materializing.
+Persistent-state payload estimate: **~21.31 GiB** plus metadata/snapshots. Initial free-space safety floor is 30 GiB; resumed sessions use a 2 GiB working-space floor.
+
+## Pilot continuous master — PAUSED / PRESERVED
+
+The first resumable master used the original Python kernel and was intentionally paused before investing multi-day compute.
+
+Root:
+
+`C:\DeepPot\runs\continuous_master`
+
+Safe final state:
+
+- `weighted mean visits = 1.90`;
+- `task min-visit median = 0`;
+- `target tasks = 0/12,285`;
+- console ended with `SAFE TO CLOSE`.
+
+This root is a pilot only and must not be mixed with the optimized trajectory.
+
+## Performance optimization — FAST V2 ACCEPTED
+
+Original representative N=8 kernel baseline:
+
+- **87,850 decision nodes/s** single process.
+
+Fast-v1:
+
+- **4.25x** N=8 single-process speedup vs reference;
+- 31-worker scaling winner: **5,514,008 nodes/s**.
+
+Fast-v2 (`FastChanceSampledCFRV2`) removes redundant reach-vector bookkeeping while preserving the exact strategy method. Differential CI requires exact equality of visit counts, regrets, strategy sums, RNG state and resume trajectory against the reference solver.
+
+Ryzen fast-v1 -> fast-v2 A/B:
+
+| N | v1 | v2 | additional speedup | v2 nodes/s |
+|---|---:|---:|---:|---:|
+| 2 | 0.090 s | 0.089 s | 1.02x | 112,654 |
+| 5 | 0.390 s | 0.363 s | 1.07x | 412,853 |
+| 8 | 2.869 s | 2.532 s | **1.13x** | **501,618** |
+
+31-worker fast-v2 N=8 check:
+
+- wall **7.354 s**;
+- aggregate **6,423,910 nodes/s**;
+- task mean 2.956 s;
+- task max 3.027 s.
+
+**Decision:** fast-v2 is the accepted Python kernel candidate. 31 workers remains frozen.
+
+## Canonical optimized master — NOT STARTED YET
+
+Canonical root reserved for the optimized trajectory:
+
+`C:\DeepPot\runs\continuous_master_fast_v2`
+
+Launcher:
+
+`tools\run_deeppot_continuous_fast_v2.ps1`
+
+The optimized master starts from iteration 1 and remains the single trajectory for V1.1 -> V1.2 -> V2 and any later 1500/2000+ continuation.
 
 ### Snapshot plan
 
-Suggested labels only:
+Suggested labels are operational conveniences only:
 
-- `V1.1` around ~5 days;
-- `V1.2` around ~10 days;
+- `V1.1` after an early useful amount of training;
+- `V1.2` later in the same trajectory;
 - `V2` when all exact infosets reach the configured 1,000 minimum.
 
-A snapshot does not consume or reset training. It creates current exact runtime bitsets + `DeepPot_<snapshot>.txt` and records visit-depth metrics and action changes versus the previous snapshot. The master can then resume from the same CFR/RNG state.
+The former 5/10/15-day idea is not a quality gate and may become obsolete because the optimized kernel is much faster.
 
-### Audit policy for the deep track
+## Final gate before canonical launch
 
-No mandatory global EV/CI audit is appended to every deep snapshot. Validation is based on:
+One short end-to-end Ryzen benchmark remains. It measures real compute + checkpoint/load/serialization cost with the accepted fast-v2 kernel and real 50,000-iteration chunk size:
 
-- actual visit depth;
-- preserved regrets/linear-average sums;
-- near-50/50 average-policy fraction;
-- cross-snapshot policy stability globally/per N.
+```powershell
+cd C:\DeepPot
+git pull
+powershell -ExecutionPolicy Bypass -File .\tools\benchmark_deeppot_continuous_fast_v2_e2e.ps1
+```
 
-Independent EV audit remains available as a targeted diagnostic for questionable states.
+It uses 31 representative N=8 tasks, performs a fresh 50k wave and a resumed 50k wave, reports effective end-to-end nodes/s and visit-min distribution, and writes only under:
 
-## Immediate gate before long Ryzen run
+`runs\kernel_benchmark_continuous_fast_v2_e2e`
 
-Do **not** start the multi-day master until:
+It does **not** touch the paused pilot or the reserved canonical root.
 
-1. repository CI is green;
-2. `python C:\DeepPot\tools\check_deeppot_continuous_resume.py` passes on the Ryzen;
-3. disk safety check passes;
-4. Base v1 frozen artifacts remain untouched.
+### Native C++ policy
+
+Do not build a C++ kernel by default. Only do so if the final E2E benchmark shows that the 1,000-min-visit runtime remains expensive enough to justify the implementation/equivalence cost. Otherwise stop optimization and launch fast-v2.
