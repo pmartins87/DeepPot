@@ -1,0 +1,169 @@
+name: Finite Multiway P4H Logit N4 Viability Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/p4h_n4.trigger'
+
+jobs:
+  p4h-n4:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - id: n4_rainbow
+            players: 4
+            flop: 'Ah 7d 2c'
+          - id: n4_monotone
+            players: 4
+            flop: 'Ah 7h 2h'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build frozen exact CFR warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.pilot \
+            --players 4 \
+            --flop '${{ matrix.flop }}' \
+            --iterations 250000 \
+            --seeds '1,2,3' \
+            --workers 3 \
+            --rake-pct 0.02 \
+            --out-dir runs/${{ matrix.id }}
+
+      - name: Build frozen FP warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_refine \
+            --players 4 \
+            --policy runs/${{ matrix.id }}/policy_consensus.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --samples-per-round 50000 \
+            --prior-weight 4 \
+            --seed-base 9402026 \
+            --out-policy runs/${{ matrix.id }}/policy_fp_warm.csv \
+            --out-audit runs/${{ matrix.id }}/fp_warm_audit.json
+
+      - name: Build frozen PED warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_ped \
+            --players 4 \
+            --policy runs/${{ matrix.id }}/policy_fp_warm.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --br-samples-per-round 50000 \
+            --gradient-samples-per-round 50000 \
+            --initial-max-coordinate-step 0.10 \
+            --seed-base 9502026 \
+            --out-policy runs/${{ matrix.id }}/policy_ped_warm.csv \
+            --out-audit runs/${{ matrix.id }}/ped_warm_audit.json
+
+      - name: Build frozen P4G warm start
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_fixed_corpus \
+            --players 4 \
+            --policy runs/${{ matrix.id }}/policy_ped_warm.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --rounds 32 \
+            --corpus-samples 50000 \
+            --corpus-seed 9802026 \
+            --initial-max-coordinate-radius 0.05 \
+            --smoothmax-beta 100 \
+            --out-policy runs/${{ matrix.id }}/policy_p4g_warm.csv \
+            --out-audit runs/${{ matrix.id }}/p4g_warm_audit.json
+
+      - name: Run frozen P4H cyclic logit continuation
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_logit_continuation \
+            --players 4 \
+            --policy runs/${{ matrix.id }}/policy_p4g_warm.csv \
+            --flop '${{ matrix.flop }}' \
+            --rake-pct 0.02 \
+            --temperatures '0.16,0.08,0.04,0.02' \
+            --sweeps-per-temperature 12 \
+            --damping 0.50 \
+            --corpus-samples 50000 \
+            --corpus-seed 9902026 \
+            --out-policy runs/${{ matrix.id }}/policy_p4h.csv \
+            --out-audit runs/${{ matrix.id }}/p4h_audit.json
+
+      - name: Run original independent response gate
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m deeppot.multiway_response \
+            --players 4 \
+            --policy runs/${{ matrix.id }}/policy_p4h.csv \
+            --flop '${{ matrix.flop }}' \
+            --learn-samples 250000 \
+            --eval-samples 250000 \
+            --seed 9302026 \
+            --rake-pct 0.02 \
+            --out runs/${{ matrix.id }}/p4h_response.json
+
+      - name: Apply frozen P4H viability threshold
+        env:
+          CASE_ID: ${{ matrix.id }}
+          FLOP: ${{ matrix.flop }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('runs') / os.environ['CASE_ID']
+          summary = json.loads((root / 'summary.json').read_text())
+          response = json.loads((root / 'p4h_response.json').read_text())
+          audit = json.loads((root / 'p4h_audit.json').read_text())
+          coverage = summary['consensus']['shared_all_coverage']
+          seat_uppers = [x['ci95_high'] for x in response['unilateral_gain']]
+          result = {
+              'phase': 'P4H_N4_CYCLIC_LOGIT_VIABILITY',
+              'case': os.environ['CASE_ID'],
+              'players': 4,
+              'flop': os.environ['FLOP'],
+              'coverage': coverage,
+              'seat_unilateral_gain_ci95_high': seat_uppers,
+              'threshold': 0.03,
+              'temperatures': [0.16, 0.08, 0.04, 0.02],
+              'sweeps_per_temperature': 12,
+              'damping': 0.50,
+              'p4h_corpus_samples': 50000,
+              'p4h_corpus_seed': 9902026,
+              'p4h_corpus_sha256': audit['corpus_sha256'],
+              'seat_order': audit['seat_order'],
+              'response_learn_samples': 250000,
+              'response_holdout_samples': 250000,
+          }
+          result['pass'] = coverage == 1.0 and all(x <= 0.03 for x in seat_uppers)
+          (root / 'p4h_gate.json').write_text(json.dumps(result, indent=2))
+          print(json.dumps(result, indent=2))
+          if not result['pass']:
+              raise SystemExit(1)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p4h-logit-${{ matrix.id }}
+          path: runs/${{ matrix.id }}/
