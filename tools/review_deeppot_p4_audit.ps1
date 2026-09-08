@@ -30,7 +30,18 @@ foreach ($n in 2..8) {
     if (-not (Test-Path $summaryPath)) {
         throw "audit_summary ausente para N=${n}: $summaryPath"
     }
-    $summaries = @(Get-Content $summaryPath -Raw | ConvertFrom-Json)
+
+    # Windows PowerShell 5.1 treats a top-level JSON array returned by
+    # ConvertFrom-Json as one pipeline object. Do not wrap it in @(...), or the
+    # outer array will have Count=1. Assign it directly and normalize only the
+    # scalar case for compatibility with newer PowerShell versions.
+    $parsed = Get-Content $summaryPath -Raw | ConvertFrom-Json
+    if ($parsed -is [System.Array]) {
+        $summaries = $parsed
+    } else {
+        $summaries = @($parsed)
+    }
+
     if ($summaries.Count -ne 1755) {
         throw "N=${n} audit_summary deveria ter 1755 flops, mas tem $($summaries.Count)"
     }
