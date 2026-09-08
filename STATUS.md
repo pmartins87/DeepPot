@@ -25,11 +25,12 @@ P4C..P4I are archived research diagnostics and are no longer release blockers. P
 - multiprocessing and resumable per-flop checkpoints implemented;
 - DeepKK-style EV/CI95 evaluator implemented;
 - compact lossless production audit implemented;
-- Windows/Ryzen production launcher implemented.
+- Windows/Ryzen production launcher implemented;
+- finite local worker-count benchmark implemented and frozen.
 
 ## Frozen DeepKK-parity production budget
 
-The first full Ryzen run is now configured as:
+The first full Ryzen run is configured as:
 
 - N=2 through N=8;
 - all 1,755 canonical flops;
@@ -44,6 +45,23 @@ The first full Ryzen run is now configured as:
 - economy profile recorded explicitly as `provisional-2pct-uncapped` for the first run.
 
 Measured solve throughput implies about **127 aggregate CPU-hours** for the N=2..8 solve portion. The Ryzen 9 executes flops in parallel; audit and I/O add further wall time.
+
+## Worker-count decision
+
+DeepKK's official 32-logical-thread Ryzen configuration used 31 workers. DeepPot preserves 31 as the fallback, but because DeepPot distributes work by independent flop rather than by the same inner batching structure, one finite local benchmark is used before the long run.
+
+Frozen benchmark protocol: `docs/RYZEN_WORKER_BENCHMARK_PROTOCOL.md`.
+
+On the known 32-logical-thread Ryzen the only candidates are **15, 23 and 31**. The benchmark runs one fixed N=8 workload on 64 evenly spread canonical flops, exactly once per candidate, then selects the lowest wall time. There is no second tuning ladder.
+
+Files:
+
+- `src/deeppot/worker_benchmark.py`
+- `tools/benchmark_deeppot_workers.ps1`
+
+The winner is written to `runs/worker_benchmark/selected_workers.txt`. `tools/run_deeppot_ryzen.ps1` reads this automatically. If the benchmark file does not exist, the fallback is `logical_processors - 1`, which is 31 on the DeepKK Ryzen.
+
+CI run `34186177695` passed the benchmark candidate/index regression tests.
 
 ## Exact output size and 494 lists
 
@@ -65,22 +83,31 @@ Ready files:
 - `src/deeppot/deepkk_style_streaming.py`
 - `src/deeppot/deepkk_style_compact.py`
 - `src/deeppot/deepkk_style_export.py`
+- `src/deeppot/worker_benchmark.py`
+- `tools/benchmark_deeppot_workers.ps1`
 - `tools/run_deeppot_ryzen.ps1`
+- `docs/RYZEN_WORKER_BENCHMARK_PROTOCOL.md`
 - `docs/RYZEN_DEEPKK_PARITY_RUN.md`
 
 Regression CI confirms that the compact production audit yields the same final decisions as the row-form DeepKK-style EV/CI evaluator.
 
 ## Current active phase
 
-**P4 — official Ryzen mathematical-base run: READY TO START.**
+**P4 — official Ryzen mathematical-base run: READY AFTER ONE LOCAL WORKER BENCHMARK.**
 
-Command from the DeepPot repository on Windows:
+First run, from the DeepPot repository on the Ryzen:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\benchmark_deeppot_workers.ps1
+```
+
+Then the official run uses the automatically selected worker count:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\run_deeppot_ryzen.ps1
 ```
 
-The run is restart-safe: executing the same command again resumes valid completed flop checkpoints.
+The official run is restart-safe: executing the same command again resumes valid completed flop checkpoints.
 
 After P4 completes, freeze the mathematical source/hashes and proceed directly to the DeepKK-like OpenHoldem operational layer.
 
