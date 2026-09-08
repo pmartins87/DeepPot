@@ -88,13 +88,19 @@ Implemented:
 - [x] 494-scenario catalogue;
 - [x] generated DeepPot mathematical TXT with one named STAY list per scenario;
 - [x] Windows/Ryzen one-command launcher;
-- [x] regression test proving compact audit produces the same final decisions as the row-form DeepKK-style evaluator.
+- [x] regression test proving compact audit produces the same final decisions as the row-form DeepKK-style evaluator;
+- [x] one finite local worker-count benchmark, with 31 preserved as DeepKK fallback.
 
 Canonical production entry point:
 
 `tools/run_deeppot_ryzen.ps1`
 
+Worker calibration entry point:
+
+`tools/benchmark_deeppot_workers.ps1`
+
 Guide: `docs/RYZEN_DEEPKK_PARITY_RUN.md`.
+Worker protocol: `docs/RYZEN_WORKER_BENCHMARK_PROTOCOL.md`.
 
 Frozen first-run budget:
 
@@ -114,11 +120,13 @@ The exact strategy contains **635,675,248 decisions** across N=2..8. They are st
 
 # P4 — Official Ryzen mathematical-base run
 
-Status: **READY TO START**
+Status: **READY AFTER ONE LOCAL WORKER BENCHMARK**
 
 This is the direct DeepPot counterpart of the official DeepKK Ryzen run.
 
-- [ ] execute `tools/run_deeppot_ryzen.ps1` on the Ryzen 9;
+- [ ] run the frozen worker benchmark once on the target Ryzen; on 32 logical processors the candidates are exactly 15, 23 and 31;
+- [ ] accept the lowest one-pass wall-time result and write `selected_workers.txt`; no second tuning ladder;
+- [ ] execute `tools/run_deeppot_ryzen.ps1` on the Ryzen 9; the launcher reads the selected worker count automatically;
 - [ ] complete all 1,755 flops for N=2..8;
 - [ ] preserve every completed flop checkpoint;
 - [ ] finish EV/CI audit for every flop;
@@ -218,9 +226,3 @@ Profit/loss over these 200 decisions is not a release criterion.
 ## ROADMAP COMPLETE
 
 After P9, begin the DeepKK-style tracking/exploitation layer with hard fallback to frozen DeepPot Base v1.
-
----
-
-# Archived research diagnostics
-
-P4C, P4D, P4E, P4F, P4G, P4H and P4I remain in the repository for reproducibility only. P4I also completed and failed its former N=4 gate; that does not affect the DeepKK-parity production route.
