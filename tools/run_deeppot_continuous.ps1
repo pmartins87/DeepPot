@@ -52,6 +52,7 @@ Write-Host "  workers: $Workers / logical processors: $logical"
 Write-Host "  worker source: $workerSource"
 Write-Host "  persistent state: $OutDir"
 Write-Host "  persistent-state estimate at full coverage: ~21.31 GiB (+ summaries/snapshots)"
+Write-Host "  initial free-disk safety floor: $MinFreeGiB GiB; resumed sessions use a 2 GiB floor"
 Write-Host "  EV audit: intentionally disabled for this deep track"
 Write-Host ""
 Write-Host "INTERRUPTION:" -ForegroundColor Yellow
@@ -62,7 +63,7 @@ Write-Host ""
 
 $env:PYTHONPATH = Join-Path $RepoRoot "src"
 $args = @(
-    "-m", "deeppot.continuous_training",
+    "-m", "deeppot.continuous_runner",
     "--out", $OutDir,
     "--target-min-visits", "$TargetMinVisits",
     "--chunk-iterations", "$ChunkIterations",
