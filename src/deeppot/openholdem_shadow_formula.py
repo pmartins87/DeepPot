@@ -9,7 +9,7 @@ SHADOW_FORMULA_VERSION = "2026-09-08.p8-shadow.1"
 def generate_shadow_formula(*, runtime_manifest_sha256: str) -> str:
     """Generate a no-action OpenHoldem shadow formula.
 
-    The file intentionally contains no Fold/Call/Bet/Raise/Allin action tokens.
+    The file intentionally contains no executable poker action commands.
     The only DeepPot query lives in f$debug so the operator can press Auto in
     OpenHoldem's debug tab and force one evaluation per heartbeat while the
     Autoplayer remains OFF. The user.dll itself logs HIT/MISS and the encoded
@@ -24,7 +24,7 @@ def generate_shadow_formula(*, runtime_manifest_sha256: str) -> str:
         f"// Shadow formula version: {SHADOW_FORMULA_VERSION}",
         f"// Runtime manifest SHA256: {runtime_manifest_sha256}",
         "// PURPOSE: live scraping/state validation only.",
-        "// This file contains NO Fold/Call/Bet/Raise/Allin action command.",
+        "// This file contains NO executable poker action command.",
         "// Keep OpenHoldem Autoplayer OFF.",
         "// Open Formula Editor -> Debug and press Auto to evaluate once per heartbeat.",
         "// dll$deeppot_action returns 0 on MISS, +scenario for STAY, -scenario for FOLD.",
