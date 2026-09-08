@@ -86,49 +86,25 @@ Implemented:
 - [x] inconclusive-state fallback to solver-average greedy action;
 - [x] compact lossless bitset output;
 - [x] 494-scenario catalogue;
-- [x] generated DeepPot mathematical TXT with one named STAY list per scenario;
 - [x] Windows/Ryzen one-command launcher;
-- [x] regression test proving compact audit produces the same final decisions as the row-form DeepKK-style evaluator;
 - [x] one finite local worker-count benchmark.
 
-Canonical production entry point: `tools/run_deeppot_ryzen.ps1`.
+Frozen production budget: N=2..8, all 1,755 flops, seed 123, 20,000 iterations/flop, 50,000 EV-audit samples/flop, minimum effective visits 25, CFR+ + linear average, confident EV-best else solver-average greedy fallback, **31 workers**.
 
-Frozen first-run budget:
-
-- all N=2..8;
-- all 1,755 flops;
-- seed 123;
-- 20,000 iterations/flop;
-- 50,000 EV-audit samples/flop;
-- minimum effective visits 25;
-- CFR+ + linear average;
-- `abs(EV_STAY-EV_FOLD)>CI95` for EV override;
-- otherwise solver-average greedy fallback;
-- **31 workers**, selected on the target Ryzen.
-
-The exact strategy contains **635,675,248 decisions** across N=2..8. They are stored losslessly in bitsets instead of a 600M-row CSV/TXT.
+The exact strategy contains **635,675,248 decisions** across N=2..8, stored losslessly as bitsets.
 
 ---
 
 # P4 — Official Ryzen mathematical-base run
 
-Status: **READY TO START — 31 WORKERS FROZEN**
+Status: **RUNNING ON TARGET RYZEN — 31 WORKERS**
 
-This is the direct DeepPot counterpart of the official DeepKK Ryzen run.
-
-Worker benchmark is complete:
-
-- [x] run frozen target-machine benchmark once;
-- [x] compare exactly 15, 23 and 31 workers;
-- [x] select lowest one-pass wall time;
-- [x] selected **31 workers**;
-- [x] record evidence in `docs/RYZEN_WORKER_BENCHMARK_RESULT_20260908.md`;
-- [x] no second worker tuning ladder.
+Worker calibration is closed: 31 workers won the frozen 15/23/31 one-pass benchmark and no further tuning will be performed.
 
 Production run:
 
-- [ ] execute `tools/run_deeppot_ryzen.ps1` on the Ryzen 9;
-- [ ] complete all 1,755 flops for N=2..8;
+- [x] start `tools/run_deeppot_ryzen.ps1` on the target Ryzen 9;
+- [ ] complete all 1,755 flops for each N=2..8;
 - [ ] preserve every completed flop checkpoint;
 - [ ] finish EV/CI audit for every flop;
 - [ ] compile final/solver/confident/low-coverage bitsets;
@@ -136,9 +112,7 @@ Production run:
 - [ ] verify completed manifest and SHA256 hashes;
 - [ ] review per-mode coverage/confidence summary once, without adding a new solver-method ladder.
 
-Measured solver throughput implies about 127 aggregate CPU-hours for the solve portion at the frozen 20k budget. Parallel execution plus the larger 50k audit makes this an hours-scale production run.
-
-If interrupted, rerun the exact same command and resume from checkpoints.
+The running local output root is `C:\DeepPot\runs\deepkk_parity_full`. If interrupted, rerunning the same command resumes valid checkpoints.
 
 ---
 
@@ -162,31 +136,45 @@ Freeze and preserve:
 
 # P6 — Operational DeepPot / OpenHoldem
 
-Status: **NOT STARTED**
+Status: **IN PROGRESS IN PARALLEL WITH P4**
 
-Build the operational equivalent of DeepKK:
+Offline/runtime-independent work already implemented:
 
+- [x] one signed `dll$deeppot_action` contract covering all 494 scenarios;
+- [x] exact runtime scenario mapping identical to trainer scenario IDs;
+- [x] mathematical-run -> minimal live-runtime package compiler;
+- [x] portable binary runtime index for all canonical flops;
+- [x] final N2..N8 exact STAY/FOLD bitset loader;
+- [x] exact 24-suit-permutation flop/hole canonicalization in C++;
+- [x] exact flop-relative hole-state ID reconstruction in C++;
+- [x] exact strategy bit lookup in C++;
+- [x] Python-reference vs C++ exact-state lookup regression test;
+- [x] generator for a DeepKK-like operational TXT with 494 explicit `f$sit_*` functions and 494 explicit `f$list_*_STAY` membership functions;
+- [x] OpenHoldem user.dll adapter source with deterministic HIT/MISS logging and fail-closed result 0;
+- [x] normalize OpenHoldem suit symbols 1..4 to DeepPot c/d/h/s indices 0..3;
+- [x] isolated OpenHoldem integration branch `deeppot_runtime_v1` in `pmartins87/myoh_private`;
+- [x] deterministic Win32 user.dll build gate created on that isolated branch;
+- [x] post-P4 runtime package builder `tools/build_deeppot_runtime.ps1`;
+- [x] operational architecture documented in `docs/P6_OPENHOLDEM_RUNTIME.md`.
+
+Still live-dependent / not yet accepted:
+
+- [ ] successful actual Win32 `user.dll` build artifact from the isolated OpenHoldem branch;
 - [ ] dedicated Pot Fold tablemap/scraper;
-- [ ] detect N=2..8;
-- [ ] detect BTN and fixed action order;
-- [ ] reconstruct prior FOLD/STAY history;
-- [ ] identify one of the 494 public scenarios;
-- [ ] read hero hole cards + flop;
-- [ ] canonicalize to the exact same flop/hole key as the trainer;
-- [ ] exact list membership lookup from the compiled mathematical bitsets/DLL;
-- [ ] output only FOLD or POT/STAY;
-- [ ] scenario/state/action logs;
-- [ ] explicit HIT/MISS;
-- [ ] fail closed on ambiguity;
-- [ ] keep exploitation out of the Base.
+- [ ] validate KKPoker chair numbering and BTN-to-last action-order reconstruction against the live table;
+- [ ] validate `playersdealtbits` / `playersplayingbits` / `foldbits2` as the exact FOLD/STAY-history source on Pot Fold;
+- [ ] validate the actual STAY/POT button action mapping; `BetPot` remains a disabled placeholder until then;
+- [ ] generate final operational formula with the completed runtime-manifest hash;
+- [ ] keep `f$deeppot_live_enabled=false` until shadow validation;
+- [ ] keep exploitation out of Base v1.
 
-The `.oppl/.txt` routing should resemble DeepKK as closely as OpenHoldem permits: explicit scenario functions and one base action route for each scenario.
+The operational `.txt` deliberately resembles DeepKK: explicit situation routing plus one logical STAY list per situation. Only the physical list membership lookup differs because native OpenPPL 169-hand lists cannot encode exact flop-relative states.
 
 ---
 
 # P7 — Compiler/lookup equivalence gate
 
-Status: **NOT STARTED**
+Status: **FOUNDATION IMPLEMENTED / FULL PASS AWAITS P4 OUTPUT**
 
 One exhaustive mathematical-to-runtime equivalence pass:
 
@@ -195,6 +183,8 @@ One exhaustive mathematical-to-runtime equivalence pass:
 - [ ] zero unknown supported keys;
 - [ ] zero action mismatches;
 - [ ] runtime binary/DLL hash recorded.
+
+The Python/C++ one-state regression already protects canonicalization/ID parity; the exhaustive all-key pass waits for the completed P4 base.
 
 ---
 
