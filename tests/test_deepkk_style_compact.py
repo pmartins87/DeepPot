@@ -1,25 +1,10 @@
 from deeppot.deepkk_style_compact import bit_is_set, evaluate_policy_deepkk_style_compact
 from deeppot.deepkk_style_evaluator import evaluate_policy_deepkk_style
-from deeppot.multiway_response import MultiwayResponseValidator, parse_flop
-
-
-def test_compact_audit_matches_row_audit_decision_rule():
-    flop = parse_flop("Ah 7d 2c")
-    probe = MultiwayResponseValidator(
-        num_players=2,
-        flop=flop,
-        policy={},
-        rake_pct=0.02,
-        rake_cap=None,
-        seed=1,
-    )
-    # Constructor validates policy width, so build the exact uniform policy first.
-    expected = probe.expected_infosets if False else None
+from deeppot.multiway_response import parse_flop
 
 
 def test_compact_audit_matches_row_audit_with_complete_policy():
     flop = parse_flop("Ah 7d 2c")
-    # N=2 has exactly two public decision scenarios. Build width from the exact index.
     from deeppot.exact_index import ExactFlopHoleIndex
     from deeppot.state_space import decision_scenario_count
 
