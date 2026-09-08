@@ -14,6 +14,20 @@ function Get-Sha256Lower([string]$Path) {
     return (Get-FileHash $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+# Windows PowerShell 5.1 runs on .NET Framework, which does not provide
+# System.IO.Path.GetRelativePath(). Keep the freeze script compatible with
+# the user's stock Windows PowerShell by deriving repo-relative paths with
+# GetFullPath + ordinal-ignore-case prefix matching.
+function Get-RepoRelativePath([string]$Path) {
+    $rootFull = [System.IO.Path]::GetFullPath($RepoRoot).TrimEnd([char[]]@('\','/'))
+    $itemFull = [System.IO.Path]::GetFullPath($Path)
+    $prefix = $rootFull + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $itemFull.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Artefato esta fora do repositorio: $itemFull"
+    }
+    return $itemFull.Substring($prefix.Length)
+}
+
 $runManifestPath = Join-Path $RunDir "RUN_MANIFEST.json"
 $runtimeManifestPath = Join-Path $RuntimeDir "deeppot_runtime_manifest.json"
 if (-not (Test-Path $runManifestPath)) { throw "RUN_MANIFEST.json nao encontrado: $runManifestPath" }
@@ -34,7 +48,7 @@ $artifacts = New-Object System.Collections.Generic.List[object]
 function Add-Artifact([string]$Role, [string]$Path) {
     if (-not (Test-Path $Path)) { throw "Artefato obrigatorio ausente: $Path" }
     $item = Get-Item $Path
-    $rel = [System.IO.Path]::GetRelativePath($RepoRoot, $item.FullName)
+    $rel = Get-RepoRelativePath $item.FullName
     $artifacts.Add([ordered]@{
         role = $Role
         path = $rel
