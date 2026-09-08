@@ -22,15 +22,16 @@ Current phase summary:
 - **P4D FP-PED:** BLOCKED;
 - **P4E projected Nash extragradient:** BLOCKED;
 - **P4F primal-dual worst-seat mirror-prox:** BLOCKED;
-- **P4G deterministic fixed-corpus worst-seat mirror-prox:** N=3 PASS; N>=4 BLOCKED by scaling gate;
-- **P4H deterministic cyclic logit-response continuation:** N=4 viability gate RUNNING;
-- P5+ waits for P0/P4 closure.
+- **P4G deterministic fixed-corpus worst-seat mirror-prox:** N=3 PASS; N>=4 BLOCKED;
+- **P4H cyclic logit continuation:** BLOCKED at N=4;
+- **P4I Anderson-accelerated QRE continuation:** N=4 finite viability gate RUNNING;
+- **P5+** waits for P0/P4 closure.
 
 ## Mechanics/economy
 
-Confirmed mechanics: 2–8 dealt players, equal ante, no preflop betting, one flop FOLD or POT/STAY decision, BTN last, automatic turn/river if 2+ remain, uncontested last-survivor terminal, and uncontested pots are raked.
+Confirmed mechanics: 2–8 dealt players, equal ante, no preflop betting, one flop FOLD or POT/STAY decision, BTN last, automatic turn/river when 2+ remain, uncontested last-survivor terminal, and uncontested pots are raked.
 
-The official KKPoker Pot Fold rules page still does not publish a Pot-Fold-specific rake schedule. Three user-reported payouts are mutually consistent with a **2% deduction from gross terminal pot**. The remaining P0 uncertainty is primarily cap/profile variation. Engineering continues under explicit provisional profile `provisional-2pct`; P5 waits for the final economy freeze. Evidence ledger: `docs/P0_ECONOMY_EVIDENCE.md`.
+Three user-reported payouts remain mutually consistent with **2% of gross terminal pot**. The unresolved P0 question is principally cap/profile variation. Engineering continues under explicit provisional profile `provisional-2pct`; final P5 production solving waits for P0 PASS. Evidence ledger: `docs/P0_ECONOMY_EVIDENCE.md`.
 
 ## P1/P2/P3
 
@@ -52,7 +53,7 @@ No further throughput ladder is planned.
 
 ## P4 HU — PASS / CLOSED
 
-All four frozen HU representative textures pass the independent split-sample unilateral-response gate after the single allowed 12-round damped bilateral response refinement.
+All four frozen HU representative textures pass the independent split-sample unilateral-response gate after the one allowed 12-round damped bilateral response refinement.
 
 Provisional-economy HU production method:
 
@@ -60,54 +61,51 @@ Provisional-economy HU production method:
 
 ## P4 multiway history
 
-P4C, P4D, P4E and P4F are blocked under their frozen protocols. Thresholds were not relaxed and no extra iteration/parameter ladders were added.
+P4C, P4D, P4E and P4F are blocked under their frozen protocols. Thresholds were not relaxed and no parameter/iteration ladders were added.
 
 ### P4G — N=3 PASS / N>=4 BLOCKED
 
-P4G fixed the negative same-corpus gap pathology and passed both N=3 representative cases:
+P4G passed both N=3 representative textures, including rainbow seat 2 at `0.029529`. Its frozen N=4 scaling then failed both textures, and N=5 also failed both. Thus P4G cannot be promoted beyond N=3. Full record: `docs/P4G_SCALING_RESULT.md`.
 
-| flop | seat 0 upper | seat 1 upper | seat 2 upper | result |
-|---|---:|---:|---:|---|
-| `Ah 7h 2h` | 0.007285 | 0.009602 | 0.011770 | PASS |
-| `Ah 7d 2c` | 0.021620 | 0.022696 | 0.029529 | PASS |
+### P4H — BLOCKED
 
-However the predeclared N=4..8 scaling workflow failed both completed N=4 textures and both completed N=5 textures despite 100% coverage and zero material negative-gap stages:
+Frozen N=4 run `34173556322` failed both textures with 100% policy coverage:
 
-| case | unilateral-gain 95% CI uppers | result |
-|---|---|---|
-| N4 rainbow | 0.075952, 0.058691, 0.049807, 0.053125 | FAIL |
-| N4 monotone | 0.036477, 0.035742, 0.025135, 0.023640 | FAIL |
-| N5 rainbow | 0.190325, 0.146310, 0.094401, 0.085317, 0.054973 | FAIL |
-| N5 monotone | 0.104327, 0.076474, 0.066987, 0.035960, 0.030935 | FAIL |
+| flop | seat 0 upper | seat 1 upper | seat 2 upper | seat 3 upper | result |
+|---|---:|---:|---:|---:|---|
+| `Ah 7d 2c` | 0.050204 | 0.070360 | 0.139722 | 0.167616 | FAIL |
+| `Ah 7h 2h` | 0.015154 | 0.017002 | 0.041315 | 0.076306 | FAIL |
 
-Threshold remains every seat <= **0.030000 ante**. Therefore P4G is **BLOCKED for N>=4**. The already-running N6..8 matrix jobs are no longer decision-relevant and cannot reopen P4G. Full record: `docs/P4G_SCALING_RESULT.md`.
+The final `tau=0.02` cyclic sweeps were still moving some coordinates by roughly 0.5, so P4H had not numerically reached its own logit fixed point. This is recorded in `docs/P4H_RESULT.md`. Per the frozen rule, P4H receives no more sweeps/damping/temperature/corpus tuning.
 
-### P4H — RUNNING
+### P4I — RUNNING
 
-P4H changes the method rather than tuning P4G. It solves the local behavioral fixed-point equations through deterministic cyclic logit-response continuation:
+P4I changes the numerical fixed-point solver instead of extending P4H. It forms the simultaneous exact-infoset logit-response map for all seats on one immutable corpus and applies regularized Type-II Anderson acceleration to the global residual.
 
-- immutable P4H chance corpus;
-- seat-wise Gauss-Seidel updates in reverse action order (BTN to first actor);
-- binary logit response based on exact-infoset conditional `STAY-FOLD` advantage;
-- frozen temperatures `0.16 -> 0.08 -> 0.04 -> 0.02` ante;
-- exactly 12 reverse-seat sweeps per temperature;
-- damping 0.50;
-- no early stopping/checkpoint selection/parameter sweep;
-- independent original response gate remains decisive.
+Frozen N=4 protocol is in `docs/P4I_ANDERSON_QRE_METHOD_RESET.md`:
 
-The method, tests and N=4 protocol were frozen before any P4H result in `docs/P4H_LOGIT_CONTINUATION_METHOD_RESET.md`. CI passed before trigger.
+- same N=4 CFR -> FP -> PED -> P4G warm start;
+- immutable 50,000-deal P4I corpus, seed `9912026`;
+- temperatures `0.16 -> 0.08 -> 0.04 -> 0.02`;
+- exactly 12 Anderson iterations per temperature;
+- memory 5, ridge `1e-8`, Anderson/Picard blend 0.50;
+- residual is diagnostic only; no early stop/checkpoint selection;
+- unchanged independent 250k-learn + 250k-holdout response gate;
+- PASS only if every seat 95% unilateral-gain upper <= `0.030000 ante`.
 
-Current P4H N=4 workflow run: `34173556322`.
+The all-seat operator was regression-tested against independent P4H per-seat operator passes; deterministic replay and simplex preservation tests also pass CI.
+
+Current P4I N=4 workflow run: `34177615764`.
 
 ## Next branch
 
-If both frozen P4H N=4 cases PASS, freeze one N=5..8 P4H scaling schedule before observing any P4H N=5 result and execute it once. If either N=4 case fails, mark P4H BLOCKED and change method; do not tune P4H.
+If both frozen P4I N=4 cases PASS, freeze one N=5..8 P4I scaling schedule before seeing any P4I N=5 result and execute it once. If either N=4 case fails, mark P4I BLOCKED and change method; do not tune P4I.
 
-P5 all-1,755-flop production solving begins only after both P0 economy and P4 calibration are closed.
+P5 all-1,755-flop production solving begins only after P0 economy and P4 calibration are both closed.
 
 ## Information useful from live Pot Fold
 
-For any clean payout observation, capture:
+For a clean payout observation capture:
 
 `players dealt | ante | table/stake label | FOLD/STAY sequence | gross terminal pot | amount awarded | net stack change | separate fee/rake line | jackpot/other fee if present`
 
