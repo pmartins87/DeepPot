@@ -28,6 +28,12 @@ def test_formula_default_stay_transport_is_betmax() -> None:
     assert "When dll$deeppot_action = 495 BetMax Force" in text
 
 
+def test_formula_allows_explicit_transport_override_for_offline_testing() -> None:
+    text = generate_openholdem_formula(stay_action="BetPot", live_enabled=False)
+    assert "STAY execution token currently configured as: BetPot" in text
+    assert "When dll$deeppot_action = 495 BetPot Force" in text
+
+
 def test_formula_does_not_preempt_dll_fail_soft_recovery_with_scrapeerror() -> None:
     text = generate_openholdem_formula(live_enabled=True)
     flop_router = text.split("##f$flop##", 1)[1].split("##f$turn##", 1)[0]
