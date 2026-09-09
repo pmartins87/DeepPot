@@ -11,6 +11,11 @@ for _n in range(2, 9):
     _running += SCENARIO_COUNTS[_n]
 TOTAL_SCENARIOS = _running
 
+# 1..494 remain exclusively the immutable trained public scenarios. 495 is an
+# action-transport sentinel used only by the live adapter's final TP+ emergency
+# floor after exact/repaired/nearest public-state recovery has been exhausted.
+EMERGENCY_STAY_CODE = TOTAL_SCENARIOS + 1
+
 
 @dataclass(frozen=True)
 class DecodedActionCode:
@@ -61,9 +66,10 @@ def encoded_action_code(num_players: int, scenario_dense_id: int, *, stay: bool)
 
     OpenHoldem caches user-DLL evaluation per action orbit rather than per
     ``dll$`` symbol name. DeepPot therefore exposes one and only one live query,
-    ``dll$deeppot_action``. Its magnitude identifies one of the 494 scenarios
-    (1..494); its sign is the final action. Zero is reserved for invalid/unknown
-    runtime state and must fail closed.
+    ``dll$deeppot_action``. Its magnitude identifies one of the 494 trained
+    scenarios (1..494); its sign is the final action. Zero is reserved for a
+    genuinely unrecoverable runtime state after fail-soft recovery. Code 495 is
+    separately reserved as the emergency STAY transport sentinel.
     """
 
     code = global_scenario_id(num_players, scenario_dense_id) + 1
@@ -72,7 +78,9 @@ def encoded_action_code(num_players: int, scenario_dense_id: int, *, stay: bool)
 
 def decode_action_code(code: int) -> DecodedActionCode:
     if code == 0:
-        raise ValueError("zero is the invalid/fail-closed runtime code")
+        raise ValueError("zero is the unrecoverable runtime code")
+    if abs(int(code)) == EMERGENCY_STAY_CODE:
+        raise ValueError("emergency STAY code has no trained public scenario")
     magnitude = abs(int(code))
     if not 1 <= magnitude <= TOTAL_SCENARIOS:
         raise ValueError("runtime action code out of range")
