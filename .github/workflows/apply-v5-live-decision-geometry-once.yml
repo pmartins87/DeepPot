@@ -1,0 +1,34 @@
+name: Apply v5 live decision geometry once
+
+on:
+  push:
+    branches:
+      - runtime/fail-soft-recovery-v1
+    paths:
+      - tools/apply_v5_live_decision_geometry_once.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: runtime/fail-soft-recovery-v1
+          fetch-depth: 0
+      - name: Apply v5 live decision geometry patch
+        run: python tools/apply_v5_live_decision_geometry_once.py
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add runtime/openholdem/deeppot_userdll.cpp tests/test_openholdem_failsoft_source_contract.py
+          git commit -m "Prefer coherent live decision geometry over stale anchor in fail-soft v5"
+          git push origin HEAD:runtime/fail-soft-recovery-v1
