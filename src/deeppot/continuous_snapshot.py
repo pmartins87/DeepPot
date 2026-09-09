@@ -29,6 +29,7 @@ MODE_INFOSETS = {
     8: 326_845_168,
 }
 MODE_SCENARIOS = {n: (1 << n) - 2 for n in range(2, 9)}
+LIVE_ADAPTER_CONTRACT = "failsoft-v5-live-decision-geometry-20260909"
 
 
 def _sha256(path: Path) -> str:
@@ -93,7 +94,7 @@ def create_snapshot(
     training_root: Path,
     name: str,
     runtime_index_source: Path,
-    stay_action: str = "BetPot",
+    stay_action: str = "BetMax",
     live_enabled: bool = True,
 ) -> dict:
     name = _safe_name(name)
@@ -196,19 +197,36 @@ def create_snapshot(
             "sha256": _sha256(runtime / "deeppot_runtime_index.bin"),
         },
         "policy_source": "greedy linear-average CFR policy; no independent EV-audit override",
+        "live_adapter_contract": LIVE_ADAPTER_CONTRACT,
         "created_at_unix": time.time(),
     }
     runtime_manifest_path = runtime / "deeppot_runtime_manifest.json"
     _atomic_write_json(runtime_manifest_path, runtime_manifest)
     runtime_manifest_sha = _sha256(runtime_manifest_path)
 
+    formula_text = generate_openholdem_formula(
+        runtime_manifest_sha256=runtime_manifest_sha,
+        stay_action=stay_action,
+        live_enabled=live_enabled,
+    )
     formula_path = out / f"DeepPot_{name}.txt"
-    formula_path.write_text(
-        generate_openholdem_formula(
-            runtime_manifest_sha256=runtime_manifest_sha,
-            stay_action=stay_action,
-            live_enabled=live_enabled,
-        ),
+    formula_path.write_text(formula_text, encoding="utf-8")
+
+    # Ready-to-copy live filename. The archival named formula is kept too so
+    # snapshots remain self-identifying while the i5 deployment is simple.
+    live_formula_path = out / "DeepPot.txt"
+    live_formula_path.write_text(formula_text, encoding="utf-8")
+
+    live_readme_path = out / "LIVE_V5_README.txt"
+    live_readme_path.write_text(
+        "DeepPot continuous snapshot ready for fail-soft v5 live adapter\n\n"
+        f"Snapshot: {name}\n"
+        f"Required/recommended user.dll generation: {LIVE_ADAPTER_CONTRACT}\n"
+        "With OpenHoldem closed, back up the current files, then replace the entire "
+        "DeepPotRuntime folder and DeepPot.txt with the copies in this snapshot.\n"
+        "Do not replace user.dll unless you intentionally want to change the live adapter.\n"
+        "DeepPot.txt uses BetMax for STAY, routes code 495 to STAY, and does not preempt "
+        "DLL fail-soft recovery with f$ScrapeError.\n",
         encoding="utf-8",
     )
 
@@ -238,6 +256,7 @@ def create_snapshot(
             "modes": per_mode,
         }
 
+    ready_for_live_v5 = live_enabled and stay_action == "BetMax"
     snapshot_manifest = {
         "format": "DeepPot continuous training snapshot",
         "snapshot_name": name,
@@ -269,6 +288,10 @@ def create_snapshot(
         "runtime_manifest_sha256": runtime_manifest_sha,
         "formula": str(formula_path),
         "formula_sha256": _sha256(formula_path),
+        "live_formula": str(live_formula_path),
+        "live_formula_sha256": _sha256(live_formula_path),
+        "live_adapter_contract": LIVE_ADAPTER_CONTRACT,
+        "ready_for_live_v5": ready_for_live_v5,
         "stability_vs_previous": stability,
         "audit": "not required by the continuous-depth track; independent EV audit remains optional/targeted",
     }
@@ -283,7 +306,9 @@ def create_snapshot(
         )
     )
     print(f"  runtime: {runtime}")
-    print(f"  formula: {formula_path}")
+    print(f"  archival formula: {formula_path}")
+    print(f"  ready live formula: {live_formula_path}")
+    print(f"  ready for v5: {ready_for_live_v5}")
     if stability is not None:
         print(
             f"  policy changes vs {stability['previous_snapshot']}: "
@@ -298,7 +323,7 @@ def main() -> None:
     ap.add_argument("--training-root", required=True)
     ap.add_argument("--name", required=True)
     ap.add_argument("--runtime-index", required=True)
-    ap.add_argument("--stay-action", default="BetPot")
+    ap.add_argument("--stay-action", default="BetMax")
     ap.add_argument("--disable-live", action="store_true")
     args = ap.parse_args()
     create_snapshot(
