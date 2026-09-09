@@ -46,6 +46,22 @@ def test_same_hand_anchor_is_available_but_cannot_override_contradictory_live_ac
     assert "ApplyHandAnchor(current, reasons);" in normalize.group(0)
 
 
+def test_three_v3_live_anchor_poisoning_cases_trigger_v4_rejection_condition() -> None:
+    # Exact live cases from the first v3 field test.  The v4 adapter condition is
+    # (playersplayingbits | foldbits2) & ~anchor.playersdealtbits != 0.
+    # Therefore each stale partial anchor below must be rejected before it can
+    # overwrite the coherent decision-time N/dealt geometry.
+    cases = [
+        # label, stale anchor dealt mask, decision-time playing, decision-time foldbits2
+        ("Qc2c/Tc6h9d", 0x07, 0xDF, 0x00),
+        ("9s5s/2c8hAh", 0x0F, 0x1E, 0xC1),
+        ("Js5d/7sQc8d", 0x3F, 0x9C, 0x43),
+    ]
+    for label, anchored_dealt, playing, folded in cases:
+        live_action_evidence = (playing | folded) & 0xFF
+        assert (live_action_evidence & ~anchored_dealt & 0xFF) != 0, label
+
+
 def test_incomplete_prior_action_evidence_is_not_accepted_as_exact_history() -> None:
     source = _source()
     assert "inferred_fold_mask != 0" in source
