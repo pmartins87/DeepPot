@@ -27,12 +27,15 @@ def test_handreset_is_evidence_not_an_unconditional_memory_wipe() -> None:
     assert "ResetForNewHand" not in body
 
 
-def test_same_hand_public_geometry_is_frozen_before_primary_lookup() -> None:
+def test_same_hand_anchor_is_available_but_cannot_override_contradictory_live_action_evidence() -> None:
     source = _source()
     assert "HAND_ANCHOR" in source
     assert "dealt_from_hand_anchor" in source
     assert "dealer_from_hand_anchor" in source
     assert "nplayersdealt_from_hand_anchor" in source
+    assert "live_action_evidence" in source
+    assert "anchor_rejected_by_live_action_evidence" in source
+    assert "live_action_evidence & ~anchored_dealt" in source
 
     normalize = re.search(
         r"bool NormalizeSnapshotForRecovery\((.*?)\n\}",
@@ -52,5 +55,5 @@ def test_incomplete_prior_action_evidence_is_not_accepted_as_exact_history() -> 
 
 def test_runtime_identifies_the_deployed_failsoft_generation_in_logs() -> None:
     source = _source()
-    assert 'kAdapterVersion = "failsoft-v3-action-history-20260909"' in source
+    assert 'kAdapterVersion = "failsoft-v4-anchor-evidence-20260909"' in source
     assert "adapter loaded version=%s" in source
