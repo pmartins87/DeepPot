@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$Name,
     [string]$RuntimeIndex = "",
-    [string]$StayAction = "BetPot",
+    [string]$StayAction = "BetMax",
     [switch]$DisableLive
 )
 
@@ -48,6 +48,8 @@ Write-Host "  name: $Name"
 Write-Host "  training root: $TrainingRoot"
 Write-Host "  stage: $($manifest.stage)"
 Write-Host "  weighted mean visits: $($manifest.weighted_mean_training_visits)"
+Write-Host "  STAY transport: $StayAction"
+Write-Host "  v5-ready DeepPot.txt will be emitted unless -DisableLive is used."
 Write-Host "  training state will NOT be consumed or reset."
 
 Push-Location $RepoRoot
