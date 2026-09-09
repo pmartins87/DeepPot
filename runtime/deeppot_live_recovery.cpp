@@ -124,10 +124,37 @@ struct ActionAssignment {
   ActionAssignment() : stay_mask(0), cost(0), reasons() {}
 };
 
+enum SeatSignal {
+  kSeatSignalUnknown = 0,
+  kSeatSignalStay = 1,
+  kSeatSignalFold = 2,
+};
+
+SeatSignal RecentSeatSignal(
+    int seat,
+    const LiveScrapeSnapshot& current,
+    const std::vector<LiveScrapeSnapshot>& history,
+    int max_lookback) {
+  int checked = 0;
+  const std::uint32_t bit = static_cast<std::uint32_t>(1) << seat;
+  for (std::vector<LiveScrapeSnapshot>::const_reverse_iterator it = history.rbegin();
+       it != history.rend() && checked < max_lookback; ++it) {
+    if (it->nchairs != current.nchairs) continue;
+    if ((it->playersdealtbits & bit) == 0) continue;
+    ++checked;
+    const bool playing = (it->playersplayingbits & bit) != 0;
+    const bool folded = (it->foldbits2 & bit) != 0;
+    if (playing && !folded) return kSeatSignalStay;
+    if (folded && !playing) return kSeatSignalFold;
+  }
+  return kSeatSignalUnknown;
+}
+
 std::vector<ActionAssignment> ActionAssignments(
     const std::vector<int>& order,
     int actor_index,
-    const LiveScrapeSnapshot& snapshot) {
+    const LiveScrapeSnapshot& snapshot,
+    const std::vector<LiveScrapeSnapshot>& history) {
   std::vector<ActionAssignment> assignments(1);
   for (int i = 0; i < actor_index; ++i) {
     const int seat = order[static_cast<std::size_t>(i)];
@@ -144,27 +171,57 @@ std::vector<ActionAssignment> ActionAssignments(
     if (folded && !playing) continue;
 
     if (!playing && !folded) {
-      const std::string reason = IntReason("infer_prior_fold_seat=", seat);
-      for (std::size_t j = 0; j < assignments.size(); ++j) {
-        assignments[j].cost += 1;
-        assignments[j].reasons.push_back(reason);
+      const SeatSignal recent = RecentSeatSignal(seat, snapshot, history, 4);
+      if (recent == kSeatSignalStay) {
+        // Preserve both interpretations. Missing foldbits2 still makes FOLD
+        // plausible, while recent same-hand playing evidence keeps STAY equally
+        // near so a one-frame playing-bit dropout cannot rewrite history.
+        std::vector<ActionAssignment> branched;
+        branched.reserve(assignments.size() * 2);
+        for (std::size_t j = 0; j < assignments.size(); ++j) {
+          ActionAssignment fold = assignments[j];
+          fold.cost += 1;
+          fold.reasons.push_back(IntReason("infer_prior_fold_seat=", seat));
+          branched.push_back(fold);
+
+          ActionAssignment stay = assignments[j];
+          stay.stay_mask |= static_cast<std::uint32_t>(1) << i;
+          stay.cost += 1;
+          stay.reasons.push_back(IntReason("recent_same_hand_stay_seat=", seat));
+          branched.push_back(stay);
+        }
+        assignments.swap(branched);
+      } else {
+        const std::string reason =
+            recent == kSeatSignalFold
+                ? IntReason("recent_same_hand_fold_seat=", seat)
+                : IntReason("infer_prior_fold_seat=", seat);
+        const int extra_cost = recent == kSeatSignalFold ? 0 : 1;
+        for (std::size_t j = 0; j < assignments.size(); ++j) {
+          assignments[j].cost += extra_cost;
+          assignments[j].reasons.push_back(reason);
+        }
       }
       continue;
     }
 
-    // Contradictory evidence: preserve both FOLD and STAY branches.
+    // Contradictory current evidence: preserve both FOLD and STAY, with a mild
+    // preference only when recent same-hand history supports one branch.
+    const SeatSignal recent = RecentSeatSignal(seat, snapshot, history, 4);
+    const int fold_cost = recent == kSeatSignalFold ? 2 : 3;
+    const int stay_cost = recent == kSeatSignalStay ? 2 : 3;
     std::vector<ActionAssignment> branched;
     branched.reserve(assignments.size() * 2);
     for (std::size_t j = 0; j < assignments.size(); ++j) {
       ActionAssignment fold = assignments[j];
-      fold.cost += 3;
+      fold.cost += fold_cost;
       fold.reasons.push_back(
           IntReason("contradictory_playing_folded_seat=", seat) + ":FOLD");
       branched.push_back(fold);
 
       ActionAssignment stay = assignments[j];
       stay.stay_mask |= static_cast<std::uint32_t>(1) << i;
-      stay.cost += 3;
+      stay.cost += stay_cost;
       stay.reasons.push_back(
           IntReason("contradictory_playing_folded_seat=", seat) + ":STAY");
       branched.push_back(stay);
@@ -278,7 +335,8 @@ std::vector<PublicStateCandidate> RecoverPublicStateCandidates(
       if (actor_it == order.end()) continue;
       const int actor = static_cast<int>(actor_it - order.begin());
 
-      const std::vector<ActionAssignment> assignments = ActionAssignments(order, actor, current);
+      const std::vector<ActionAssignment> assignments =
+          ActionAssignments(order, actor, current, history);
       for (std::size_t i = 0; i < assignments.size(); ++i) {
         const ActionAssignment& assignment = assignments[i];
         const int dense = Strategy::ScenarioDenseId(n, actor, assignment.stay_mask);
