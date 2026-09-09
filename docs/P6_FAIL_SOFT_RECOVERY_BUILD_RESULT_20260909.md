@@ -53,10 +53,11 @@ The Tc7s hand therefore no longer dies at state reconstruction. Its correct
 runtime question is the immutable policy lookup for `N=8`, `actor=5`,
 `prior_stay_mask=0`, exact flop `7d 6h 4d`, exact hole `Tc 7s`.
 
-Historical replay outcomes are diagnostic evidence, not a rollout gate. We do
-not require replaying or querying an already-passed hand before applying the
-agreed runtime correction. The regression requirement is that this class of
-state reaches a legal policy lookup instead of code 0.
+Historical replay outcomes are diagnostic evidence, not a rollout gate. By user
+decision on 2026-09-09, the already-passed Tc7s hand will not be re-queried or
+replayed as a prerequisite. The required correction is prospective: future
+instances of this failure class must reach a legal policy lookup instead of
+code 0/FOLD.
 
 ## Portable CI
 
