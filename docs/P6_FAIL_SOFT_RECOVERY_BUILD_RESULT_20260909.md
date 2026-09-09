@@ -53,6 +53,11 @@ The Tc7s hand therefore no longer dies at state reconstruction. Its correct
 runtime question is the immutable policy lookup for `N=8`, `actor=5`,
 `prior_stay_mask=0`, exact flop `7d 6h 4d`, exact hole `Tc 7s`.
 
+Historical replay outcomes are diagnostic evidence, not a rollout gate. We do
+not require replaying or querying an already-passed hand before applying the
+agreed runtime correction. The regression requirement is that this class of
+state reaches a legal policy lookup instead of code 0.
+
 ## Portable CI
 
 The Python reference and portable C++ recovery harness pass the DeepPot GitHub
@@ -103,16 +108,20 @@ used only by the final TP+ operational floor when no public-state candidate can
 be reconstructed. The generated OpenPPL formula routes `495` directly to the
 configured STAY action.
 
+The validated live STAY transport is `BetMax`, matching the current operational
+DeepPot semantics. `BetPot` is no longer the default/packaging token for this
+runtime branch.
+
 The flop router no longer preempts the DLL with `f$ScrapeError`; otherwise a bad
 `nplayersdealt` scrape would force FOLD before the DLL got the chance to repair
 that exact problem.
 
 ## Still required before replacing the live files
 
-1. Query the real local immutable runtime package for the Tc7s regression and
-   record whether exact scenario 272 is STAY or FOLD.
-2. Update/regenerate the operational formula with emergency code 495 support and
-   the correct live STAY token.
-3. Run a short controlled i5 live test and inspect the resulting log for
+1. Regenerate or patch the operational formula with fail-soft code `495` support
+   and `BetMax` as STAY transport.
+2. Install the already-built fail-soft `user.dll` together with the matching
+   formula in a controlled i5 test setup.
+3. Run a short controlled live test and inspect the resulting log for
    `HIT EXACT`, `HIT RECOVERED*`, `EMERGENCY`, and `MISS UNRECOVERABLE` events.
 4. Only after that merge/promote the feature branches.
