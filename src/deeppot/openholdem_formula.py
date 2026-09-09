@@ -4,16 +4,16 @@ import argparse
 from pathlib import Path
 
 from .deepkk_style_export import enumerate_all_scenarios
-from .runtime_contract import encoded_action_code
+from .runtime_contract import EMERGENCY_STAY_CODE, encoded_action_code
 
 
-FORMULA_GENERATOR_VERSION = "2026-09-08.p6.1"
+FORMULA_GENERATOR_VERSION = "2026-09-09.p6.failsoft2"
 
 
 def generate_openholdem_formula(
     *,
     runtime_manifest_sha256: str = "PENDING",
-    stay_action: str = "BetPot",
+    stay_action: str = "BetMax",
     live_enabled: bool = False,
 ) -> str:
     """Generate the DeepKK-like operational formula around one DLL query.
@@ -23,6 +23,13 @@ def generate_openholdem_formula(
     the immutable bitsets. Only ``dll$deeppot_action`` is queried because the
     OpenHoldem user-DLL symbol engine caches one ProcessQuery result per action
     orbit without distinguishing different dll$ symbol names.
+
+    Codes 1..494 remain immutable trained scenario/action results. Code 495 is
+    deliberately outside that catalogue and is only an emergency STAY transport
+    sentinel used after fail-soft public-state recovery has been exhausted.
+
+    Pot Fold live semantics are binary: STAY pays the maximum configured amount.
+    The validated OpenPPL transport token is therefore BetMax, not BetPot.
     """
 
     if not stay_action or any(ch.isspace() for ch in stay_action):
@@ -42,13 +49,15 @@ def generate_openholdem_formula(
         "// Exact list membership lives in lossless runtime bitsets; no hand bucketting.",
         "// One DLL symbol only: dll$deeppot_action.",
         "// Return contract:",
-        "//   0      = invalid/unknown state -> fail closed",
-        "//   +1..494 = STAY, magnitude identifies the global scenario",
-        "//   -1..-494 = FOLD, magnitude identifies the global scenario",
+        "//   0       = genuinely unrecoverable live state after fail-soft recovery",
+        "//   +1..494 = STAY, magnitude identifies the global trained scenario",
+        "//   -1..-494 = FOLD, magnitude identifies the global trained scenario",
+        f"//   +{EMERGENCY_STAY_CODE}      = emergency STAY transport sentinel (not a trained scenario)",
         "//",
         f"// STAY execution token currently configured as: {stay_action}",
-        "// IMPORTANT: keep f$deeppot_live_enabled=false until Pot Fold tablemap/scraper",
-        "// and the live STAY-button mapping have passed the shadow validation gate.",
+        "// IMPORTANT: fail-soft state recovery belongs in the DLL; this formula only",
+        "// transports the already-resolved action. Zero remains the last unrecoverable",
+        "// fallback, while the emergency STAY sentinel must execute STAY directly.",
         "// ============================================================================",
         "",
         "##f$deeppot_live_enabled##",
@@ -63,8 +72,8 @@ def generate_openholdem_formula(
         "##f$preflop##",
         "",
         "##f$flop##",
-        "When f$ScrapeError Fold Force",
         "When !f$deeppot_live_enabled Fold Force",
+        f"When dll$deeppot_action = {EMERGENCY_STAY_CODE} {stay_action} Force",
         "When dll$deeppot_action = 0 Fold Force",
     ]
 
@@ -129,7 +138,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Generate DeepPot DeepKK-style OpenHoldem formula")
     ap.add_argument("--out", required=True)
     ap.add_argument("--runtime-manifest-sha256", default="PENDING")
-    ap.add_argument("--stay-action", default="BetPot")
+    ap.add_argument("--stay-action", default="BetMax")
     ap.add_argument("--enable-live", action="store_true")
     args = ap.parse_args()
     text = generate_openholdem_formula(
