@@ -86,6 +86,12 @@ Again, this is an adapter state-reconstruction failure, not evidence that the tr
 6. Add the three live cases above as mandatory regression tests before another Windows build/live rollout.
 7. Live acceptance requires no decision where the adapter's chosen N contradicts a coherent decision-time `playersdealtbits/nplayersdealt` snapshot without explicit, stronger same-hand evidence explaining the override.
 
+## v4 patch status
+
+A focused source correction has now been applied on the feature branch as adapter generation `failsoft-v4-anchor-evidence-20260909`. `ApplyHandAnchor()` rejects the frozen anchor when current `playersplayingbits | foldbits2` proves that a seat omitted by the anchor actually participated in the hand. A source regression contract requires this guard before CI can pass.
+
+This is intentionally still **not approved for live use** until the full CI + Windows Release|Win32 build and the new exact live regressions pass.
+
 ## Immediate operational status
 
 v3 is withdrawn from live use. Restore the pre-v3 `user.dll`/formula backup or keep OpenHoldem stopped until a v4 build passes the new regressions.
