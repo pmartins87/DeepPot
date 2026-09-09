@@ -43,7 +43,14 @@ def test_same_hand_public_geometry_is_frozen_before_primary_lookup() -> None:
     assert "ApplyHandAnchor(current, reasons);" in normalize.group(0)
 
 
+def test_incomplete_prior_action_evidence_is_not_accepted_as_exact_history() -> None:
+    source = _source()
+    assert "inferred_fold_mask != 0" in source
+    assert "deferred_to_policy_recovery" in source
+    assert "RecoverPublicStateCandidates(current, g_hand.snapshots, 64)" in source
+
+
 def test_runtime_identifies_the_deployed_failsoft_generation_in_logs() -> None:
     source = _source()
-    assert 'kAdapterVersion = "failsoft-v2-hand-anchor-20260909"' in source
+    assert 'kAdapterVersion = "failsoft-v3-action-history-20260909"' in source
     assert "adapter loaded version=%s" in source
