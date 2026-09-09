@@ -7,13 +7,13 @@ from .deepkk_style_export import enumerate_all_scenarios
 from .runtime_contract import EMERGENCY_STAY_CODE, encoded_action_code
 
 
-FORMULA_GENERATOR_VERSION = "2026-09-09.p6.failsoft1"
+FORMULA_GENERATOR_VERSION = "2026-09-09.p6.failsoft2"
 
 
 def generate_openholdem_formula(
     *,
     runtime_manifest_sha256: str = "PENDING",
-    stay_action: str = "BetPot",
+    stay_action: str = "BetMax",
     live_enabled: bool = False,
 ) -> str:
     """Generate the DeepKK-like operational formula around one DLL query.
@@ -27,6 +27,9 @@ def generate_openholdem_formula(
     Codes 1..494 remain immutable trained scenario/action results. Code 495 is
     deliberately outside that catalogue and is only an emergency STAY transport
     sentinel used after fail-soft public-state recovery has been exhausted.
+
+    Pot Fold live semantics are binary: STAY pays the maximum configured amount.
+    The validated OpenPPL transport token is therefore BetMax, not BetPot.
     """
 
     if not stay_action or any(ch.isspace() for ch in stay_action):
@@ -135,7 +138,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Generate DeepPot DeepKK-style OpenHoldem formula")
     ap.add_argument("--out", required=True)
     ap.add_argument("--runtime-manifest-sha256", default="PENDING")
-    ap.add_argument("--stay-action", default="BetPot")
+    ap.add_argument("--stay-action", default="BetMax")
     ap.add_argument("--enable-live", action="store_true")
     args = ap.parse_args()
     text = generate_openholdem_formula(
