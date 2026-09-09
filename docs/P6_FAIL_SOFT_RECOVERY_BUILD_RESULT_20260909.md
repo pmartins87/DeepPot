@@ -126,3 +126,6 @@ that exact problem.
 3. Run a short controlled live test and inspect the resulting log for
    `HIT EXACT`, `HIT RECOVERED*`, `EMERGENCY`, and `MISS UNRECOVERABLE` events.
 4. Only after that merge/promote the feature branches.
+
+The objective is not to reproduce old hands. It is to prevent the same class of
+scrape/runtime failure from creating avoidable FOLDs in future decisions.
