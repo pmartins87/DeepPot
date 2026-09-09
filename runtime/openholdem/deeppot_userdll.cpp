@@ -30,7 +30,7 @@ namespace {
 const int kEmergencyStayCode = 495;  // transport only; not a trained scenario id
 const std::size_t kMaxHandSnapshots = 32;
 const int kHandresetGraceObservations = 4;
-const char* kAdapterVersion = "failsoft-v3-action-history-20260909";
+const char* kAdapterVersion = "failsoft-v4-anchor-evidence-20260909";
 
 HMODULE g_module = NULL;
 deeppot_runtime::Strategy g_strategy;
@@ -281,6 +281,20 @@ void ApplyHandAnchor(
   if (!g_hand.have_anchor) return;
 
   const deeppot_runtime::LiveScrapeSnapshot& a = g_hand.anchor;
+  const std::uint32_t anchored_dealt = a.playersdealtbits & SeatMask(a.nchairs);
+
+  // v4 live-safety rule: an old anchor is fallback evidence, never absolute
+  // truth. If current action evidence contains a seat that the anchor says was
+  // never dealt, the anchor is provably incomplete/stale and must not overwrite
+  // the live geometry. This is exactly the failure seen live with Qc2c (N3->N7),
+  // 9s5s (N4->N7) and Js5d (N6->N8).
+  const std::uint32_t live_action_evidence =
+      (current->playersplayingbits | current->foldbits2) & SeatMask(a.nchairs);
+  if ((live_action_evidence & ~anchored_dealt) != 0) {
+    if (reasons) reasons->push_back("anchor_rejected_by_live_action_evidence");
+    return;
+  }
+
   if (current->nchairs != a.nchairs) {
     current->nchairs = a.nchairs;
     if (reasons) reasons->push_back("nchairs_from_hand_anchor");
@@ -293,7 +307,6 @@ void ApplyHandAnchor(
     current->dealerchair = a.dealerchair;
     if (reasons) reasons->push_back("dealer_from_hand_anchor");
   }
-  const std::uint32_t anchored_dealt = a.playersdealtbits & SeatMask(a.nchairs);
   if ((current->playersdealtbits & SeatMask(a.nchairs)) != anchored_dealt) {
     current->playersdealtbits = anchored_dealt;
     if (reasons) reasons->push_back("dealt_from_hand_anchor");
