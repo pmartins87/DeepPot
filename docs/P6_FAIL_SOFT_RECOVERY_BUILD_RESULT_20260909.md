@@ -21,54 +21,55 @@ The runtime must execute the immutable DeepPot strategy while remaining tolerant
 to ordinary live scrape/state failures. Public-state recognition failure must
 trigger repair/recovery rather than automatically becoming code 0/FOLD.
 
-The current recovery ladder is:
+The recovery ladder is:
 
 1. exact coherent state;
-2. deterministic repair of known one-decision semantics such as incomplete
-   `foldbits2`;
-3. same-hand memory for cards and public state;
-4. frozen same-hand public anchor for `N`, dealt mask, hero chair and BTN;
-5. nearest legal public-state search;
-6. immutable-policy lookup for candidate states and weighted consensus;
-7. nearest-candidate policy tie-break if consensus is unresolved;
-8. emergency TP+ STAY floor only when public-state reconstruction itself is
-   impossible while exact/cached cards remain known.
+2. same-hand exact card/public-state memory;
+3. frozen hand anchor for N, dealt mask, hero chair and BTN;
+4. deterministic interpretation of unambiguous prior actions;
+5. nearest legal public-state search for ambiguous/noisy evidence;
+6. immutable-policy lookup over candidate states and weighted consensus;
+7. nearest-policy tie-break when consensus is unresolved;
+8. emergency TP+ STAY floor only after policy-backed public-state recovery is
+   exhausted while exact/cached cards remain known.
 
 The strategy bitsets are never retrained or altered by this layer.
 
-## Fail-soft v2 hand continuity
+## Fail-soft v3 action-history continuity
 
 Adapter generation:
 
-`failsoft-v2-hand-anchor-20260909`
+`failsoft-v3-action-history-20260909`
 
-The v2 adapter adds two important protections that were missing from v1:
+v3 retains the v2 frozen same-hand geometry and noisy-handreset tolerance and
+adds protection against transient prior-action corruption.
 
-- **frozen hand geometry**: once a coherent hand snapshot exists, the current
-  hand keeps its original dealt mask/N and BTN even if a player joins, leaves,
-  disappears from the scrape, or the BTN later becomes unreadable;
-- **no blind memory wipe on `DLLUpdateOnHandreset()`**: a hand-reset callback is
-  treated as evidence and confirmed by a non-flop transition or changed exact
-  card identity before same-hand memory is discarded. This prevents a noisy
-  lifecycle callback from destroying precisely the history needed for recovery.
+A prior actor that disappears from both `playersplayingbits` and `foldbits2`
+can legitimately be a missing-foldbit case, but it can also be a one-frame
+`playersplayingbits` dropout of a real STAY. Therefore missing action evidence is
+no longer accepted by the primary path as exact history. It is deferred to the
+policy-backed recovery layer. If recent same-hand history showed the seat still
+playing, both FOLD and STAY interpretations remain nearby candidates and the
+immutable DeepPot policy participates in resolving the ambiguity.
 
-History supplied to nearest-state recovery is structurally anchored while live
-playing/fold evidence remains current.
+Clear current evidence remains authoritative: playing-only is STAY and
+folded-only is FOLD. A simultaneous playing+folded contradiction branches rather
+than hard-failing.
 
-The DLL also writes its adapter generation to the log at load time so a stale
-binary can be identified directly from the live log.
+## Hand continuity and cards
 
-## Card handling
+Once a coherent same-hand anchor exists, joins/leaves or a transient BTN/dealt
+scrape cannot silently redefine N/action order for that hand. A hand-reset
+callback is evidence, not an unconditional memory wipe; the boundary is confirmed
+from lifecycle/card evidence before same-hand state is discarded.
 
 Exact flop/hole cards are never approximated to different cards. A missing card
-read can reuse only the valid exact card identity already cached for the same
-hand. Structural recovery changes public state only; it does not map one poker
-hand to another.
+read may reuse only the valid exact identity cached for the same hand.
 
 ## `log_pf2` mandatory regressions
 
 All six old `MISS state: ambiguous prior FOLD/STAY scrape` observations map to
-legal public states in the portable recovery regression suite:
+legal public states:
 
 | hand | N | actor | prior STAY mask | dense scenario | global code |
 |---|---:|---:|---:|---:|---:|
@@ -79,71 +80,70 @@ legal public states in the portable recovery regression suite:
 | Tc7s / 7d6h4d | 8 | 5 | 0 | 31 | 272 |
 | Ts9s / Th3sAd | 8 | 4 | 4 | 19 | 260 |
 
-The historical Tc7s hand is not a rollout gate. The correction is prospective:
-future occurrences of this failure class must reach the trained policy instead
-of dying at public-state reconstruction.
+The historical Tc7s hand is not a rollout gate. The correction is prospective.
 
-## DeepPot CI
+## Fault-injection coverage
 
-Current head validation:
+The branch now also exercises:
 
-- GitHub Actions run: `34313441110`
+- exact round-trip of all **494** legal public decision states;
+- missing `foldbits2` across the legal catalogue;
+- one-frame prior-STAY `playersplayingbits` dropout with same-hand history;
+- missing BTN/history recovery;
+- mid-hand extra-seat/dealt-mask contamination;
+- combined BTN + seat-mask noise;
+- playing+folded contradictions;
+- portable C++ parity for the transient action-history dropout.
+
+Latest DeepPot CI:
+
+- run: `34314311875`
+- head: `8584d74c3a6bc48a84e6ee112d9cb89cfad90c75`
 - result: **PASS**
-- includes Python recovery tests, portable C++ recovery tests, all six `log_pf2`
-  regressions, BTN-loss/history recovery, seat-mask inconsistency,
-  playing+folded contradiction, emergency TP+ classification, and source-contract
-  checks that handreset no longer blindly wipes same-hand memory and the hand
-  anchor is applied before primary lookup.
 
-## Windows OpenHoldem build — v2
+## Windows OpenHoldem build — v3
 
 GitHub Actions run:
 
 - repository: `pmartins87/myoh_private`
 - branch: `deeppot_failsoft_recovery_v1`
-- run: `34313248737`
-- source commit: `fecb7173c4adc6744cd4e9d2941ce885d600c4bc`
-- runner: Windows Server 2022 / Visual Studio 2022 Enterprise
-- MSVC: `14.44.35207`
+- run: `34314447599`
+- source commit: `c76c16e3c7904da5146fe1cdfb93dc8437411551`
 - configuration: `Release | Win32`
 - result: **PASS**
 - compiler/linker errors: **0**
 
 Produced `user.dll` SHA256:
 
-`70440DCB0DBAF9D3563F5065D15D1481F01C524E6550205929917D89F8132ACE`
+`A6E5DA3ED7239442A1C5EAC611C4C6C9A402B34BADE9A3382CA32CC804BA5B06`
 
 Artifact:
 
 - name: `deeppot-userdll-win32`
-- artifact ID: `10089143070`
-- artifact ZIP SHA256: `c19b1dca22b4685372d40bfd0e2caf8bc4b95e7cd126de7589f37b7144a73242`
+- artifact ID: `10089555181`
+- artifact ZIP SHA256: `e1bbddd38a8cb162c4f4edf3a5b18a56a546a50a5943e1f0c469e65542226e3a`
 
-The build emitted only the same three non-blocking legacy/project-name warnings
-seen previously: one OpenHoldem C4229 and two MSB8012 output-name warnings.
-There were zero new compiler/linker errors.
+The build emitted only the existing non-blocking OpenHoldem/project-name warnings
+and zero compile/link errors.
 
 ## Action transport
 
 Codes `1..494` remain the immutable trained scenario/action codes. Code `495`
-is reserved outside the trained catalogue as `EMERGENCY_STAY_CODE`, used only by
-the final TP+ operational floor when no legal public-state candidate survives.
+is reserved outside the trained catalogue as `EMERGENCY_STAY_CODE`.
 
-The generated operational formula supports code `495`, does not preempt the DLL
-with `f$ScrapeError`, and uses the already-established live STAY transport token
-`BetMax`.
+The matching fail-soft operational formula supports `495`, does not preempt the
+DLL with `f$ScrapeError`, and uses the established STAY transport `BetMax`.
 
 ## Next gate
 
-The code/build gate is complete. The remaining gate is a short controlled live
-test using the v2 DLL and matching fail-soft formula, followed by inspection of
-DeepPot-only runtime lines:
+The next gate is a short controlled live test using the v3 DLL and matching
+formula. Inspect only DeepPot runtime lines relevant to the strategy pipeline:
 
-- `adapter loaded version=failsoft-v2-hand-anchor-20260909`;
+- `adapter loaded version=failsoft-v3-action-history-20260909`;
 - `HIT EXACT`;
 - `HIT RECOVERED_PRIMARY`;
 - `HIT RECOVERED_CONSENSUS` / `HIT RECOVERED_NEAREST_TIEBREAK`;
 - `EMERGENCY`;
 - `MISS UNRECOVERABLE`.
 
-Only after that live gate should the feature branch be promoted/merged.
+Only after a clean live gate should the feature branch be promoted/merged.
