@@ -75,6 +75,25 @@ int main() {
   }
   if (!saw_fold || !saw_stay) return 31;
 
+  // One-frame playersplayingbits dropout must not erase a recent same-hand STAY.
+  // Dealer 4 / Hero 2 => prior order 5,6,7,0,1. Masks 0 and 2 below differ
+  // only in seat 6's inferred action.
+  LiveScrapeSnapshot clean = S(4,2,255,92,163,8); // prior STAY mask 0b00010
+  LiveScrapeSnapshot dropout = S(4,2,255,28,163,8); // seat 6 playing bit vanished
+  history.clear();
+  history.push_back(clean);
+  recovered = deeppot_runtime::RecoverPublicStateCandidates(dropout, history);
+  if (recovered.empty()) return 32;
+  bool kept_recent_stay = false;
+  for (std::size_t i = 0; i < recovered.size() && i < 16; ++i) {
+    if (recovered[i].num_players == 8 && recovered[i].actor_index == 5 &&
+        recovered[i].prior_stay_mask == 2) {
+      kept_recent_stay = true;
+      break;
+    }
+  }
+  if (!kept_recent_stay) return 33;
+
   // Tc7s on 7d6h4d is top pair; Ts9s on Th3sAd is only second pair.
   std::array<Card,3> flop_tp = {{{7,1},{6,2},{4,1}}};
   std::array<Card,2> hole_tp = {{{10,0},{7,3}}};
