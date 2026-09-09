@@ -30,7 +30,7 @@ namespace {
 const int kEmergencyStayCode = 495;  // transport only; not a trained scenario id
 const std::size_t kMaxHandSnapshots = 32;
 const int kHandresetGraceObservations = 4;
-const char* kAdapterVersion = "failsoft-v2-hand-anchor-20260909";
+const char* kAdapterVersion = "failsoft-v3-action-history-20260909";
 
 HMODULE g_module = NULL;
 deeppot_runtime::Strategy g_strategy;
@@ -534,7 +534,9 @@ bool BuildPrimaryPublicState(
       stay_mask |= static_cast<std::uint32_t>(1) << i;
     } else if (!is_folded) {
       // In this one-decision game, a prior dealt actor no longer present in the
-      // playing mask has already folded even if foldbits2 lost that evidence.
+      // playing mask has usually folded even if foldbits2 lost that evidence.
+      // DeepPotAction will defer any such inferred action to the policy-backed
+      // recovery layer instead of accepting it as exact history.
       inferred |= static_cast<std::uint32_t>(1) << i;
     }
   }
@@ -606,39 +608,42 @@ int DeepPotAction() {
       deeppot_runtime::QueryResult result = g_strategy.Query(n, actor, stay_mask, flop, hole);
       if (result.ok) {
         const int encoded = result.EncodedAction();
-        if (inferred_fold_mask == 0 && normalization_reasons.empty() && !cards_from_cache) {
-          WriteLog(
-              "[DeepPot] HIT EXACT N=%d actor=%d scenario=%d code=%d flop=%d hole=%d action=%s\n",
-              n,
-              actor,
-              result.scenario_dense_id,
-              encoded,
-              result.flop_index,
-              result.exact_hole_state_id,
-              const_cast<char*>(result.stay ? "STAY" : "FOLD"));
+        if (inferred_fold_mask != 0) {
+          std::ostringstream deferred;
+          deferred << "primary_missing_action_evidence_actor_mask=0x" << std::hex
+                   << inferred_fold_mask << " deferred_to_policy_recovery";
+          error = deferred.str();
         } else {
-          std::vector<std::string> reasons = normalization_reasons;
-          if (inferred_fold_mask != 0) {
-            std::ostringstream inferred;
-            inferred << "infer_missing_foldbits_actor_mask=0x" << std::hex << inferred_fold_mask;
-            reasons.push_back(inferred.str());
+          if (normalization_reasons.empty() && !cards_from_cache) {
+            WriteLog(
+                "[DeepPot] HIT EXACT N=%d actor=%d scenario=%d code=%d flop=%d hole=%d action=%s\n",
+                n,
+                actor,
+                result.scenario_dense_id,
+                encoded,
+                result.flop_index,
+                result.exact_hole_state_id,
+                const_cast<char*>(result.stay ? "STAY" : "FOLD"));
+          } else {
+            std::vector<std::string> reasons = normalization_reasons;
+            if (cards_from_cache) reasons.push_back("cards_from_same_hand_cache");
+            const std::string reason_text = JoinReasons(reasons);
+            WriteLog(
+                "[DeepPot] HIT RECOVERED_PRIMARY reason=%s N=%d actor=%d scenario=%d code=%d flop=%d hole=%d action=%s\n",
+                const_cast<char*>(reason_text.c_str()),
+                n,
+                actor,
+                result.scenario_dense_id,
+                encoded,
+                result.flop_index,
+                result.exact_hole_state_id,
+                const_cast<char*>(result.stay ? "STAY" : "FOLD"));
           }
-          if (cards_from_cache) reasons.push_back("cards_from_same_hand_cache");
-          const std::string reason_text = JoinReasons(reasons);
-          WriteLog(
-              "[DeepPot] HIT RECOVERED_PRIMARY reason=%s N=%d actor=%d scenario=%d code=%d flop=%d hole=%d action=%s\n",
-              const_cast<char*>(reason_text.c_str()),
-              n,
-              actor,
-              result.scenario_dense_id,
-              encoded,
-              result.flop_index,
-              result.exact_hole_state_id,
-              const_cast<char*>(result.stay ? "STAY" : "FOLD"));
+          return encoded;
         }
-        return encoded;
+      } else {
+        error = "primary lookup: " + result.error;
       }
-      error = "primary lookup: " + result.error;
     } else {
       error = primary_error;
     }
