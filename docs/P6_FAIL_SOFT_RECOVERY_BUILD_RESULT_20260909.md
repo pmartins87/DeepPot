@@ -117,15 +117,16 @@ The flop router no longer preempts the DLL with `f$ScrapeError`; otherwise a bad
 `nplayersdealt` scrape would force FOLD before the DLL got the chance to repair
 that exact problem.
 
-## Still required before replacing the live files
+## Rollout checklist
 
-1. Regenerate or patch the operational formula with fail-soft code `495` support
-   and `BetMax` as STAY transport.
-2. Install the already-built fail-soft `user.dll` together with the matching
-   formula in a controlled i5 test setup.
+1. Produce the matching operational formula with code `495` support and `BetMax`
+   as STAY transport.
+2. Install the already-built fail-soft `user.dll` together with that formula in
+   a controlled i5 test setup.
 3. Run a short controlled live test and inspect the resulting log for
    `HIT EXACT`, `HIT RECOVERED*`, `EMERGENCY`, and `MISS UNRECOVERABLE` events.
 4. Only after that merge/promote the feature branches.
 
-The objective is not to reproduce old hands. It is to prevent the same class of
-scrape/runtime failure from creating avoidable FOLDs in future decisions.
+The objective is prospective: prevent the same class of scrape/runtime failure
+from creating avoidable FOLDs in future decisions, without retraining or changing
+the immutable strategy bitsets.
