@@ -5,7 +5,7 @@ from deeppot.runtime_contract import EMERGENCY_STAY_CODE, TOTAL_SCENARIOS
 def test_formula_has_exactly_494_situations_and_494_stay_membership_functions() -> None:
     text = generate_openholdem_formula(
         runtime_manifest_sha256="abc123",
-        stay_action="BetPot",
+        stay_action="BetMax",
         live_enabled=False,
     )
     assert TOTAL_SCENARIOS == 494
@@ -17,9 +17,15 @@ def test_formula_has_exactly_494_situations_and_494_stay_membership_functions() 
     assert "dll$deeppot_action = -494" in text
     assert "##f$deeppot_live_enabled##\nfalse" in text
     assert "When !f$deeppot_live_enabled Fold Force" in text
-    assert "When dll$deeppot_action = 495 BetPot Force" in text
+    assert "When dll$deeppot_action = 495 BetMax Force" in text
     assert "When dll$deeppot_action = 0 Fold Force" in text
     assert "Runtime manifest SHA256: abc123" in text
+
+
+def test_formula_default_stay_transport_is_betmax() -> None:
+    text = generate_openholdem_formula(live_enabled=True)
+    assert "STAY execution token currently configured as: BetMax" in text
+    assert "When dll$deeppot_action = 495 BetMax Force" in text
 
 
 def test_formula_does_not_preempt_dll_fail_soft_recovery_with_scrapeerror() -> None:
