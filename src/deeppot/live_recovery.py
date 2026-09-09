@@ -144,20 +144,56 @@ def _dealer_cost(
     return 6, ("dealer_without_current_or_history_support",)
 
 
+def _recent_seat_signal(
+    seat: int,
+    current: ScrapeSnapshot,
+    history: Sequence[ScrapeSnapshot],
+    *,
+    max_lookback: int = 4,
+) -> str | None:
+    """Return the latest unambiguous same-hand signal for one seat.
+
+    A prior actor that vanishes from both live masks is normally a fold, but a
+    one-frame playersplayingbits dropout must not erase a recently observed
+    STAY. History is therefore used only to *branch* uncertain evidence, never
+    to overwrite a clear current playing/fold signal.
+    """
+
+    checked = 0
+    for snapshot in reversed(history):
+        if checked >= max_lookback:
+            break
+        if snapshot.nchairs != current.nchairs:
+            continue
+        bit = 1 << seat
+        if not (snapshot.playersdealtbits & bit):
+            continue
+        checked += 1
+        playing = bool(snapshot.playersplayingbits & bit)
+        folded = bool(snapshot.foldbits2 & bit)
+        if playing and not folded:
+            return "STAY"
+        if folded and not playing:
+            return "FOLD"
+    return None
+
+
 def _action_assignments(
     order: Sequence[int],
     actor_index: int,
     snapshot: ScrapeSnapshot,
+    history: Sequence[ScrapeSnapshot],
 ) -> tuple[tuple[int, int, tuple[str, ...]], ...]:
     """Return `(stay_mask, cost, reasons)` for prior actors.
 
     Pot Fold is a one-decision game. A prior actor absent from both the current
-    playing mask and foldbits2 is normally a vanished folded cardback, therefore
-    FOLD with only a very small repair cost. A playing+folded contradiction is
-    branched instead of hard-failing.
+    playing mask and foldbits2 is normally a vanished folded cardback. However,
+    if the same-hand history recently showed that seat still playing, preserve
+    both FOLD and STAY as equally near candidates so a transient playing-bit
+    dropout cannot irreversibly rewrite the action history. A playing+folded
+    contradiction is also branched instead of hard-failing.
     """
 
-    choices: list[tuple[tuple[int, int, str | None], ...]] = []
     per_actor: list[tuple[tuple[int, int, str | None], ...]] = []
     for i in range(actor_index):
         seat = order[i]
@@ -169,14 +205,26 @@ def _action_assignments(
         elif folded and not playing:
             per_actor.append(((0, 0, None),))
         elif not playing and not folded:
-            per_actor.append(((0, 1, f"infer_prior_fold_seat={seat}"),))
+            recent = _recent_seat_signal(seat, snapshot, history)
+            if recent == "STAY":
+                per_actor.append(
+                    (
+                        (0, 1, f"infer_prior_fold_seat={seat}"),
+                        (1, 1, f"recent_same_hand_stay_seat={seat}"),
+                    )
+                )
+            elif recent == "FOLD":
+                per_actor.append(((0, 0, f"recent_same_hand_fold_seat={seat}"),))
+            else:
+                per_actor.append(((0, 1, f"infer_prior_fold_seat={seat}"),))
         else:
-            # Contradictory current evidence. Preserve both possibilities and
-            # let public-state proximity + policy consensus decide.
+            recent = _recent_seat_signal(seat, snapshot, history)
+            fold_cost = 2 if recent == "FOLD" else 3
+            stay_cost = 2 if recent == "STAY" else 3
             per_actor.append(
                 (
-                    (0, 3, f"contradictory_playing_folded_seat={seat}:FOLD"),
-                    (1, 3, f"contradictory_playing_folded_seat={seat}:STAY"),
+                    (0, fold_cost, f"contradictory_playing_folded_seat={seat}:FOLD"),
+                    (1, stay_cost, f"contradictory_playing_folded_seat={seat}:STAY"),
                 )
             )
 
@@ -252,7 +300,9 @@ def recover_public_state_candidates(
             except ValueError:
                 continue
 
-            for stay_mask, action_cost, action_reasons in _action_assignments(order, actor, current):
+            for stay_mask, action_cost, action_reasons in _action_assignments(
+                order, actor, current, history
+            ):
                 try:
                     dense = scenario_dense_id_from_mask(n, actor, stay_mask)
                 except ValueError:
