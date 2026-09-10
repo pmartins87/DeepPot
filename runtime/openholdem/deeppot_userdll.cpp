@@ -1,44 +1,108 @@
 // DeepPot OpenHoldem user.dll adapter.
 //
-// This file is intended to replace DLLs/User_DLL/user.cpp in a dedicated
-// DeepPot OpenHoldem build. Keep deeppot_runtime_core.{h,cpp} in the same
-// project and add deeppot_runtime_core.cpp to user.vcxproj.
-//
 // Runtime package location at execution time:
 //   <directory containing user.dll>\DeepPotRuntime\
 //
-// IMPORTANT: this adapter performs state recognition + immutable bit lookup
-// only. It does not calculate equity, solve poker, or alter the trained policy.
+// IMPORTANT: this adapter performs only DeepPot state recognition/recovery and
+// immutable strategy lookup. The operational decision contract is DeepPot's
+// binary STAY/BET versus FOLD policy.
 
 #define USER_DLL
 
 #include "user.h"
 #include "OpenHoldemFunctions.h"
 #include "deeppot_runtime_core.h"
+#include "deeppot_live_recovery.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <map>
+#include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 #include <windows.h>
 
 namespace {
 
+const int kEmergencyStayCode = 495;  // transport only; not a trained scenario id
+const std::size_t kMaxHandSnapshots = 32;
+const int kHandresetGraceObservations = 4;
+const char* kAdapterVersion = "failsoft-v5-live-decision-geometry-20260909";
+
 HMODULE g_module = NULL;
 deeppot_runtime::Strategy g_strategy;
+
+struct HandMemory {
+  std::vector<deeppot_runtime::LiveScrapeSnapshot> snapshots;
+
+  bool have_cards;
+  std::array<deeppot_runtime::Card, 3> flop;
+  std::array<deeppot_runtime::Card, 2> hole;
+
+  // Frozen public geometry for the current hand. Once a coherent observation
+  // exists, joins/leaves or a disappearing/mis-scraped BTN cannot silently
+  // redefine N/action order during that hand.
+  bool have_anchor;
+  deeppot_runtime::LiveScrapeSnapshot anchor;
+
+  // OpenHoldem lifecycle callbacks can occur while the old visual state is
+  // still exposed. A handreset is therefore treated as evidence, not an
+  // unconditional instruction to destroy useful same-hand state.
+  int pending_handreset_observations;
+  int last_betround;
+  int last_common_cards;
+
+  HandMemory()
+      : snapshots(),
+        have_cards(false),
+        flop(),
+        hole(),
+        have_anchor(false),
+        anchor(),
+        pending_handreset_observations(0),
+        last_betround(-1),
+        last_common_cards(-1) {}
+
+  void ClearHandData() {
+    snapshots.clear();
+    have_cards = false;
+    have_anchor = false;
+    pending_handreset_observations = 0;
+  }
+
+  void FullReset() {
+    ClearHandData();
+    last_betround = -1;
+    last_common_cards = -1;
+  }
+};
+
+HandMemory g_hand;
 
 int IntSymbol(const char* name) {
   return static_cast<int>(GetSymbol(name));
 }
 
-int BitCount(unsigned int value) {
+int BitCount(std::uint32_t value) {
   int count = 0;
   while (value != 0) {
     value &= value - 1;
     ++count;
   }
   return count;
+}
+
+bool ValidChair(int chair, int nchairs) {
+  return chair >= 0 && chair < nchairs;
+}
+
+std::uint32_t SeatMask(int nchairs) {
+  if (nchairs <= 0) return 0;
+  if (nchairs >= 32) return 0xFFFFFFFFu;
+  return (static_cast<std::uint32_t>(1) << nchairs) - 1u;
 }
 
 std::string ModuleDirectory() {
@@ -69,7 +133,10 @@ bool EnsureStrategyLoaded(std::string* error) {
     if (error) *error = load_error;
     return false;
   }
-  WriteLog("[DeepPot] runtime loaded from %s\n", const_cast<char*>(root.c_str()));
+  WriteLog(
+      "[DeepPot] runtime loaded adapter=%s root=%s\n",
+      const_cast<char*>(kAdapterVersion),
+      const_cast<char*>(root.c_str()));
   if (error) error->clear();
   return true;
 }
@@ -78,81 +145,425 @@ bool ReadCard(const char* rank_symbol, const char* suit_symbol, deeppot_runtime:
   const int rank = IntSymbol(rank_symbol);
   const int openholdem_suit = IntSymbol(suit_symbol);
 
-  // OpenHoldem exposes the PokerEval/StdDeck zero-based suit values:
-  //   Hearts=0, Diamonds=1, Clubs=2, Spades=3.
-  // DeepPot's exact-state engine uses:
-  //   Clubs=0, Diamonds=1, Hearts=2, Spades=3.
-  // Therefore this is NOT an identity mapping and must not use +/-1 arithmetic.
+  // OpenHoldem: Hearts=0, Diamonds=1, Clubs=2, Spades=3.
+  // DeepPot:    Clubs=0, Diamonds=1, Hearts=2, Spades=3.
   if (rank < 2 || rank > 14 || openholdem_suit < 0 || openholdem_suit > 3) return false;
-
-  static const int kOpenHoldemSuitToDeepPot[4] = {
-      2,  // OH Hearts   -> DeepPot Hearts
-      1,  // OH Diamonds -> DeepPot Diamonds
-      0,  // OH Clubs    -> DeepPot Clubs
-      3,  // OH Spades   -> DeepPot Spades
-  };
+  static const int kOpenHoldemSuitToDeepPot[4] = {2, 1, 0, 3};
   out->rank = rank;
   out->suit = kOpenHoldemSuitToDeepPot[openholdem_suit];
   return true;
 }
 
-bool BuildRuntimeQuery(
+int CardCode(const deeppot_runtime::Card& card) {
+  return (card.rank - 2) * 4 + card.suit;
+}
+
+bool CardsValidAndUnique(
+    const std::array<deeppot_runtime::Card, 3>& flop,
+    const std::array<deeppot_runtime::Card, 2>& hole) {
+  bool seen[52] = {false};
+  const deeppot_runtime::Card all[5] = {flop[0], flop[1], flop[2], hole[0], hole[1]};
+  for (int i = 0; i < 5; ++i) {
+    if (all[i].rank < 2 || all[i].rank > 14 || all[i].suit < 0 || all[i].suit > 3) {
+      return false;
+    }
+    const int code = CardCode(all[i]);
+    if (seen[code]) return false;
+    seen[code] = true;
+  }
+  return true;
+}
+
+bool SameCardIdentity(
+    const std::array<deeppot_runtime::Card, 3>& flop_a,
+    const std::array<deeppot_runtime::Card, 2>& hole_a,
+    const std::array<deeppot_runtime::Card, 3>& flop_b,
+    const std::array<deeppot_runtime::Card, 2>& hole_b) {
+  std::array<int, 3> fa = {{CardCode(flop_a[0]), CardCode(flop_a[1]), CardCode(flop_a[2])}};
+  std::array<int, 3> fb = {{CardCode(flop_b[0]), CardCode(flop_b[1]), CardCode(flop_b[2])}};
+  std::array<int, 2> ha = {{CardCode(hole_a[0]), CardCode(hole_a[1])}};
+  std::array<int, 2> hb = {{CardCode(hole_b[0]), CardCode(hole_b[1])}};
+  std::sort(fa.begin(), fa.end());
+  std::sort(fb.begin(), fb.end());
+  std::sort(ha.begin(), ha.end());
+  std::sort(hb.begin(), hb.end());
+  return fa == fb && ha == hb;
+}
+
+bool ReadCurrentCards(
+    std::array<deeppot_runtime::Card, 3>* flop,
+    std::array<deeppot_runtime::Card, 2>* hole) {
+  if (!ReadCard("$$pr0", "$$ps0", &(*hole)[0]) ||
+      !ReadCard("$$pr1", "$$ps1", &(*hole)[1]) ||
+      !ReadCard("$$cr0", "$$cs0", &(*flop)[0]) ||
+      !ReadCard("$$cr1", "$$cs1", &(*flop)[1]) ||
+      !ReadCard("$$cr2", "$$cs2", &(*flop)[2])) {
+    return false;
+  }
+  return CardsValidAndUnique(*flop, *hole);
+}
+
+deeppot_runtime::LiveScrapeSnapshot ReadRawSnapshot() {
+  deeppot_runtime::LiveScrapeSnapshot s;
+  s.nchairs = IntSymbol("nchairs");
+  s.dealerchair = IntSymbol("dealerchair");
+  s.userchair = IntSymbol("userchair");
+  s.playersdealtbits = static_cast<std::uint32_t>(IntSymbol("playersdealtbits"));
+  s.playersplayingbits = static_cast<std::uint32_t>(IntSymbol("playersplayingbits"));
+  s.foldbits2 = static_cast<std::uint32_t>(IntSymbol("foldbits2"));
+  s.nplayersdealt = IntSymbol("nplayersdealt");
+  return s;
+}
+
+bool CoherentAnchorSnapshot(const deeppot_runtime::LiveScrapeSnapshot& s) {
+  if (s.nchairs < 2 || s.nchairs > 10 ||
+      !ValidChair(s.userchair, s.nchairs) ||
+      !ValidChair(s.dealerchair, s.nchairs)) {
+    return false;
+  }
+  const std::uint32_t dealt = s.playersdealtbits & SeatMask(s.nchairs);
+  const int n = BitCount(dealt);
+  if (n < 2 || n > 8 || n != s.nplayersdealt) return false;
+  if ((dealt & (static_cast<std::uint32_t>(1) << s.userchair)) == 0) return false;
+  if ((dealt & (static_cast<std::uint32_t>(1) << s.dealerchair)) == 0) return false;
+  return true;
+}
+
+void ResetForNewHand(const char* reason) {
+  if (g_hand.have_cards || g_hand.have_anchor || !g_hand.snapshots.empty()) {
+    WriteLog(
+        "[DeepPot] HAND_BOUNDARY reason=%s previous_snapshots=%d\n",
+        const_cast<char*>(reason),
+        static_cast<int>(g_hand.snapshots.size()));
+  }
+  g_hand.ClearHandData();
+}
+
+void SetHandAnchorIfMissing(const deeppot_runtime::LiveScrapeSnapshot& raw) {
+  if (g_hand.have_anchor || !CoherentAnchorSnapshot(raw)) return;
+  g_hand.anchor = raw;
+  g_hand.anchor.playersdealtbits &= SeatMask(raw.nchairs);
+  g_hand.anchor.nplayersdealt = BitCount(g_hand.anchor.playersdealtbits);
+  g_hand.have_anchor = true;
+  WriteLog(
+      "[DeepPot] HAND_ANCHOR nchairs=%d dealer=%d hero=%d dealt=0x%X N=%d\n",
+      g_hand.anchor.nchairs,
+      g_hand.anchor.dealerchair,
+      g_hand.anchor.userchair,
+      g_hand.anchor.playersdealtbits,
+      g_hand.anchor.nplayersdealt);
+}
+
+bool SameSnapshot(
+    const deeppot_runtime::LiveScrapeSnapshot& a,
+    const deeppot_runtime::LiveScrapeSnapshot& b) {
+  return a.nchairs == b.nchairs &&
+         a.dealerchair == b.dealerchair &&
+         a.userchair == b.userchair &&
+         a.playersdealtbits == b.playersdealtbits &&
+         a.playersplayingbits == b.playersplayingbits &&
+         a.foldbits2 == b.foldbits2 &&
+         a.nplayersdealt == b.nplayersdealt;
+}
+
+void RememberSnapshot(const deeppot_runtime::LiveScrapeSnapshot& s) {
+  if (s.nchairs < 2 || s.nchairs > 10 || !ValidChair(s.userchair, s.nchairs)) return;
+  if (!g_hand.snapshots.empty() && SameSnapshot(g_hand.snapshots.back(), s)) return;
+  g_hand.snapshots.push_back(s);
+  if (g_hand.snapshots.size() > kMaxHandSnapshots) {
+    g_hand.snapshots.erase(g_hand.snapshots.begin());
+  }
+}
+
+bool StrongLiveDecisionGeometry(const deeppot_runtime::LiveScrapeSnapshot& s) {
+  if (!CoherentAnchorSnapshot(s)) return false;
+  const std::uint32_t seat_mask = SeatMask(s.nchairs);
+  const std::uint32_t dealt = s.playersdealtbits & seat_mask;
+  const std::uint32_t playing = s.playersplayingbits & seat_mask;
+  const std::uint32_t folded = s.foldbits2 & seat_mask;
+  const std::uint32_t hero_bit = static_cast<std::uint32_t>(1) << s.userchair;
+
+  // Decision-time geometry is considered authoritative only when every dealt
+  // seat has a complete, non-contradictory live state and Hero is still live.
+  // This deliberately excludes transient dropout/foldbit noise, which remains
+  // eligible for same-hand anchor/history recovery.
+  if ((playing & ~dealt) != 0 || (folded & ~dealt) != 0) return false;
+  if ((playing & folded) != 0) return false;
+  if ((playing | folded) != dealt) return false;
+  if ((playing & hero_bit) == 0 || (folded & hero_bit) != 0) return false;
+  return true;
+}
+
+void ApplyHandAnchor(
+    deeppot_runtime::LiveScrapeSnapshot* current,
+    std::vector<std::string>* reasons,
+    bool prefer_current_geometry) {
+  if (!g_hand.have_anchor) return;
+
+  const deeppot_runtime::LiveScrapeSnapshot& a = g_hand.anchor;
+  const std::uint32_t anchored_dealt = a.playersdealtbits & SeatMask(a.nchairs);
+
+  // v5 decision-time precedence: a complete, internally coherent live public
+  // snapshot paired with live exact cards outranks an older same-hand anchor.
+  // The anchor is recovery evidence, not authority over a valid current Hero,
+  // BTN or dealt geometry. This fixes the v4 5s5c, Qc7s and Ad7d live failures.
+  if (prefer_current_geometry && StrongLiveDecisionGeometry(*current)) {
+    const std::uint32_t current_dealt = current->playersdealtbits & SeatMask(current->nchairs);
+    const bool differs_from_anchor =
+        current->nchairs != a.nchairs ||
+        current->userchair != a.userchair ||
+        current->dealerchair != a.dealerchair ||
+        current_dealt != anchored_dealt ||
+        current->nplayersdealt != BitCount(anchored_dealt);
+    if (differs_from_anchor && reasons) {
+      reasons->push_back("live_decision_geometry_preferred_over_anchor");
+    }
+    return;
+  }
+
+  // v4 live-safety rule retained as a secondary defense: an old anchor is
+  // fallback evidence, never absolute
+  // truth. If current action evidence contains a seat that the anchor says was
+  // never dealt, the anchor is provably incomplete/stale and must not overwrite
+  // the live geometry. This is exactly the failure seen live with Qc2c (N3->N7),
+  // 9s5s (N4->N7) and Js5d (N6->N8).
+  const std::uint32_t live_action_evidence =
+      (current->playersplayingbits | current->foldbits2) & SeatMask(a.nchairs);
+  if ((live_action_evidence & ~anchored_dealt) != 0) {
+    if (reasons) reasons->push_back("anchor_rejected_by_live_action_evidence");
+    return;
+  }
+
+  if (current->nchairs != a.nchairs) {
+    current->nchairs = a.nchairs;
+    if (reasons) reasons->push_back("nchairs_from_hand_anchor");
+  }
+  if (current->userchair != a.userchair) {
+    current->userchair = a.userchair;
+    if (reasons) reasons->push_back("userchair_from_hand_anchor");
+  }
+  if (current->dealerchair != a.dealerchair) {
+    current->dealerchair = a.dealerchair;
+    if (reasons) reasons->push_back("dealer_from_hand_anchor");
+  }
+  if ((current->playersdealtbits & SeatMask(a.nchairs)) != anchored_dealt) {
+    current->playersdealtbits = anchored_dealt;
+    if (reasons) reasons->push_back("dealt_from_hand_anchor");
+  } else {
+    current->playersdealtbits = anchored_dealt;
+  }
+  const int anchored_n = BitCount(anchored_dealt);
+  if (current->nplayersdealt != anchored_n) {
+    current->nplayersdealt = anchored_n;
+    if (reasons) reasons->push_back("nplayersdealt_from_hand_anchor");
+  }
+}
+
+void ObserveLifecycle() {
+  const int betround = IntSymbol("betround");
+  const int common = IntSymbol("ncommoncardsknown");
+
+  const bool backwards_to_new_hand =
+      (g_hand.last_common_cards >= 3 && common >= 0 && common < 3) ||
+      (g_hand.last_betround >= 2 && betround > 0 && betround <= 1);
+  const bool reset_callback_confirmed =
+      g_hand.pending_handreset_observations > 0 &&
+      ((common >= 0 && common < 3) || (betround > 0 && betround <= 1));
+
+  if (backwards_to_new_hand || reset_callback_confirmed) {
+    ResetForNewHand(reset_callback_confirmed ? "handreset_confirmed_nonflop" : "street_transition_to_new_hand");
+  }
+
+  g_hand.last_betround = betround;
+  g_hand.last_common_cards = common;
+}
+
+void CaptureLiveObservation() {
+  ObserveLifecycle();
+  deeppot_runtime::LiveScrapeSnapshot raw = ReadRawSnapshot();
+
+  if (IntSymbol("ncommoncardsknown") == 3) {
+    std::array<deeppot_runtime::Card, 3> flop;
+    std::array<deeppot_runtime::Card, 2> hole;
+    if (ReadCurrentCards(&flop, &hole)) {
+      if (g_hand.have_cards && !SameCardIdentity(g_hand.flop, g_hand.hole, flop, hole)) {
+        // A complete valid card identity cannot change inside this one-decision
+        // flop hand. Treat the change as a new-hand boundary when lifecycle
+        // evidence exists or the new public geometry itself is coherent.
+        if (g_hand.pending_handreset_observations > 0 || CoherentAnchorSnapshot(raw)) {
+          ResetForNewHand(
+              g_hand.pending_handreset_observations > 0
+                  ? "handreset_confirmed_card_identity_changed"
+                  : "card_identity_changed_with_coherent_public_state");
+        }
+      }
+      if (!g_hand.have_cards || SameCardIdentity(g_hand.flop, g_hand.hole, flop, hole)) {
+        g_hand.flop = flop;
+        g_hand.hole = hole;
+        g_hand.have_cards = true;
+      }
+    }
+  }
+
+  SetHandAnchorIfMissing(raw);
+
+  // History consumed by nearest-state recovery is structurally anchored. Live
+  // playing/fold bits remain current, but a join/leave/button scrape cannot
+  // poison the historical N/order for this hand.
+  deeppot_runtime::LiveScrapeSnapshot historical = raw;
+  ApplyHandAnchor(&historical, NULL, false);
+  RememberSnapshot(historical);
+
+  if (g_hand.pending_handreset_observations > 0) {
+    --g_hand.pending_handreset_observations;
+  }
+}
+
+bool GetDecisionCards(
+    std::array<deeppot_runtime::Card, 3>* flop,
+    std::array<deeppot_runtime::Card, 2>* hole,
+    bool* from_cache) {
+  std::array<deeppot_runtime::Card, 3> live_flop;
+  std::array<deeppot_runtime::Card, 2> live_hole;
+  if (ReadCurrentCards(&live_flop, &live_hole)) {
+    if (!g_hand.have_cards || SameCardIdentity(g_hand.flop, g_hand.hole, live_flop, live_hole)) {
+      g_hand.flop = live_flop;
+      g_hand.hole = live_hole;
+      g_hand.have_cards = true;
+      *flop = live_flop;
+      *hole = live_hole;
+      if (from_cache) *from_cache = false;
+      return true;
+    }
+
+    // A conflicting but syntactically valid card scrape is not allowed to
+    // overwrite same-hand exact cards unless the public state is coherent enough
+    // to identify a genuine new hand.
+    const deeppot_runtime::LiveScrapeSnapshot raw = ReadRawSnapshot();
+    if (CoherentAnchorSnapshot(raw)) {
+      ResetForNewHand("decision_card_identity_changed");
+      g_hand.flop = live_flop;
+      g_hand.hole = live_hole;
+      g_hand.have_cards = true;
+      SetHandAnchorIfMissing(raw);
+      deeppot_runtime::LiveScrapeSnapshot historical = raw;
+      ApplyHandAnchor(&historical, NULL, false);
+      RememberSnapshot(historical);
+      *flop = live_flop;
+      *hole = live_hole;
+      if (from_cache) *from_cache = false;
+      return true;
+    }
+  }
+
+  if (g_hand.have_cards) {
+    *flop = g_hand.flop;
+    *hole = g_hand.hole;
+    if (from_cache) *from_cache = true;
+    return true;
+  }
+  return false;
+}
+
+bool NormalizeSnapshotForRecovery(
+    deeppot_runtime::LiveScrapeSnapshot* current,
+    std::vector<std::string>* reasons,
+    bool prefer_current_geometry) {
+  ApplyHandAnchor(current, reasons, prefer_current_geometry);
+
+  if (current->nchairs < 2 || current->nchairs > 10) {
+    bool restored = false;
+    for (std::vector<deeppot_runtime::LiveScrapeSnapshot>::const_reverse_iterator it =
+             g_hand.snapshots.rbegin();
+         it != g_hand.snapshots.rend(); ++it) {
+      if (it->nchairs >= 2 && it->nchairs <= 10) {
+        current->nchairs = it->nchairs;
+        restored = true;
+        if (reasons) reasons->push_back("nchairs_from_same_hand_history");
+        break;
+      }
+    }
+    if (!restored) {
+      current->nchairs = 8;
+      if (reasons) reasons->push_back("nchairs_default_8");
+    }
+  }
+
+  if (!ValidChair(current->userchair, current->nchairs)) {
+    for (std::vector<deeppot_runtime::LiveScrapeSnapshot>::const_reverse_iterator it =
+             g_hand.snapshots.rbegin();
+         it != g_hand.snapshots.rend(); ++it) {
+      if (it->nchairs == current->nchairs && ValidChair(it->userchair, current->nchairs)) {
+        current->userchair = it->userchair;
+        if (reasons) reasons->push_back("userchair_from_same_hand_history");
+        break;
+      }
+    }
+  }
+
+  if (!ValidChair(current->dealerchair, current->nchairs)) {
+    for (std::vector<deeppot_runtime::LiveScrapeSnapshot>::const_reverse_iterator it =
+             g_hand.snapshots.rbegin();
+         it != g_hand.snapshots.rend(); ++it) {
+      if (it->nchairs == current->nchairs && ValidChair(it->dealerchair, current->nchairs)) {
+        current->dealerchair = it->dealerchair;
+        if (reasons) reasons->push_back("dealer_from_same_hand_history");
+        break;
+      }
+    }
+  }
+
+  return ValidChair(current->userchair, current->nchairs);
+}
+
+bool BuildPrimaryPublicState(
+    const deeppot_runtime::LiveScrapeSnapshot& s,
     int* num_players,
     int* actor_index,
     std::uint32_t* prior_stay_mask,
-    std::array<deeppot_runtime::Card, 3>* flop,
-    std::array<deeppot_runtime::Card, 2>* hole,
+    std::uint32_t* inferred_fold_mask,
     std::string* error) {
-  if (GetSymbol("ismyturn") <= 0.0) {
-    if (error) *error = "not hero turn";
-    return false;
-  }
-  if (IntSymbol("betround") != 2 || IntSymbol("ncommoncardsknown") != 3) {
-    if (error) *error = "not a clean flop decision";
-    return false;
-  }
-
-  const int nchairs = IntSymbol("nchairs");
-  const int dealer = IntSymbol("dealerchair");
-  const int user = IntSymbol("userchair");
-  if (nchairs < 2 || nchairs > 10 || dealer < 0 || dealer >= nchairs || user < 0 || user >= nchairs) {
+  if (s.nchairs < 2 || s.nchairs > 10 ||
+      !ValidChair(s.dealerchair, s.nchairs) ||
+      !ValidChair(s.userchair, s.nchairs)) {
     if (error) *error = "invalid chair/dealer scrape";
     return false;
   }
 
-  const unsigned int dealt = static_cast<unsigned int>(IntSymbol("playersdealtbits"));
-  const unsigned int playing = static_cast<unsigned int>(IntSymbol("playersplayingbits"));
-  const unsigned int folded = static_cast<unsigned int>(IntSymbol("foldbits2"));
+  const std::uint32_t seat_mask = SeatMask(s.nchairs);
+  const std::uint32_t dealt = s.playersdealtbits & seat_mask;
+  const std::uint32_t playing = s.playersplayingbits & seat_mask;
+  const std::uint32_t folded = s.foldbits2 & seat_mask;
   const int n = BitCount(dealt);
-  if (n < 2 || n > 8 || n != IntSymbol("nplayersdealt")) {
+  if (n < 2 || n > 8 || n != s.nplayersdealt) {
     if (error) *error = "players-dealt count mismatch";
     return false;
   }
-  if ((dealt & (1u << dealer)) == 0 || (dealt & (1u << user)) == 0) {
+  if ((dealt & (static_cast<std::uint32_t>(1) << s.dealerchair)) == 0 ||
+      (dealt & (static_cast<std::uint32_t>(1) << s.userchair)) == 0) {
     if (error) *error = "dealer or hero absent from dealt mask";
     return false;
   }
-  if ((playing & (1u << user)) == 0 || (folded & (1u << user)) != 0) {
+  if ((playing & (static_cast<std::uint32_t>(1) << s.userchair)) == 0 ||
+      (folded & (static_cast<std::uint32_t>(1) << s.userchair)) != 0) {
     if (error) *error = "hero playing/fold state inconsistent";
     return false;
   }
 
-  // Pot Fold uses fixed postflop order: first dealt chair clockwise after BTN,
-  // with BTN last. Empty chairs are skipped.
   std::vector<int> order;
-  order.reserve(n);
-  for (int step = 1; step <= nchairs; ++step) {
-    const int chair = (dealer + step) % nchairs;
-    if ((dealt & (1u << chair)) != 0) order.push_back(chair);
+  order.reserve(static_cast<std::size_t>(n));
+  for (int step = 1; step <= s.nchairs; ++step) {
+    const int chair = (s.dealerchair + step) % s.nchairs;
+    if ((dealt & (static_cast<std::uint32_t>(1) << chair)) != 0) order.push_back(chair);
   }
-  if (static_cast<int>(order.size()) != n || order.back() != dealer) {
+  if (static_cast<int>(order.size()) != n || order.back() != s.dealerchair) {
     if (error) *error = "cannot reconstruct fixed Pot Fold action order";
     return false;
   }
 
   int actor = -1;
   for (int i = 0; i < n; ++i) {
-    if (order[i] == user) {
+    if (order[static_cast<std::size_t>(i)] == s.userchair) {
       actor = i;
       break;
     }
@@ -162,15 +573,10 @@ bool BuildRuntimeQuery(
     return false;
   }
 
-  // KKPoker Pot Fold does not reliably retain foldbits2 for every prior actor
-  // after the folded cardback disappears. In this one-decision game every dealt
-  // PRIOR actor has already chosen exactly one action, so playersplayingbits is
-  // the primary state signal: still holding cards = STAY; no longer holding
-  // cards = FOLD. foldbits2 remains a consistency check when present.
   std::uint32_t stay_mask = 0;
-  std::uint32_t inferred_fold_mask = 0;
+  std::uint32_t inferred = 0;
   for (int i = 0; i < actor; ++i) {
-    const unsigned int bit = 1u << order[i];
+    const std::uint32_t bit = static_cast<std::uint32_t>(1) << order[static_cast<std::size_t>(i)];
     const bool is_folded = (folded & bit) != 0;
     const bool is_playing = (playing & bit) != 0;
     if (is_folded && is_playing) {
@@ -178,87 +584,241 @@ bool BuildRuntimeQuery(
       return false;
     }
     if (is_playing) {
-      stay_mask |= (1u << i);
+      stay_mask |= static_cast<std::uint32_t>(1) << i;
     } else if (!is_folded) {
-      inferred_fold_mask |= (1u << i);
+      // In this one-decision game, a prior dealt actor no longer present in the
+      // playing mask has usually folded even if foldbits2 lost that evidence.
+      // DeepPotAction will defer any such inferred action to the policy-backed
+      // recovery layer instead of accepting it as exact history.
+      inferred |= static_cast<std::uint32_t>(1) << i;
     }
   }
-  if (inferred_fold_mask != 0) {
-    WriteLog(
-        "[DeepPot] INFO prior FOLD inferred from playersplayingbits actor_mask=0x%X; foldbits2 incomplete\n",
-        inferred_fold_mask);
-  }
 
-  if (!ReadCard("$$pr0", "$$ps0", &(*hole)[0]) ||
-      !ReadCard("$$pr1", "$$ps1", &(*hole)[1]) ||
-      !ReadCard("$$cr0", "$$cs0", &(*flop)[0]) ||
-      !ReadCard("$$cr1", "$$cs1", &(*flop)[1]) ||
-      !ReadCard("$$cr2", "$$cs2", &(*flop)[2])) {
-    if (error) *error = "hole/flop cards incomplete or invalid";
+  if (deeppot_runtime::Strategy::ScenarioDenseId(n, actor, stay_mask) < 0) {
+    if (error) *error = "primary public state is terminal/invalid";
     return false;
   }
-
   *num_players = n;
   *actor_index = actor;
   *prior_stay_mask = stay_mask;
+  if (inferred_fold_mask) *inferred_fold_mask = inferred;
   if (error) error->clear();
   return true;
 }
 
+std::string JoinReasons(const std::vector<std::string>& reasons) {
+  if (reasons.empty()) return "none";
+  std::ostringstream out;
+  for (std::size_t i = 0; i < reasons.size(); ++i) {
+    if (i != 0) out << ",";
+    out << reasons[i];
+  }
+  return out.str();
+}
+
+typedef std::tuple<int, int, std::uint32_t> PublicKey;
+
+PublicKey CandidateKey(const deeppot_runtime::PublicStateCandidate& c) {
+  return PublicKey(c.num_players, c.actor_index, c.prior_stay_mask);
+}
+
 int DeepPotAction() {
+  if (GetSymbol("ismyturn") <= 0.0) return 0;
+
   std::string error;
   if (!EnsureStrategyLoaded(&error)) {
-    WriteLog("[DeepPot] MISS runtime-load: %s\n", const_cast<char*>(error.c_str()));
+    WriteLog("[DeepPot] MISS UNRECOVERABLE runtime-load: %s\n", const_cast<char*>(error.c_str()));
     return 0;
   }
 
-  int n = 0;
-  int actor = -1;
-  std::uint32_t prior_stay_mask = 0;
+  CaptureLiveObservation();
+
   std::array<deeppot_runtime::Card, 3> flop;
   std::array<deeppot_runtime::Card, 2> hole;
-  if (!BuildRuntimeQuery(&n, &actor, &prior_stay_mask, &flop, &hole, &error)) {
-    WriteLog("[DeepPot] MISS state: %s\n", const_cast<char*>(error.c_str()));
+  bool cards_from_cache = false;
+  if (!GetDecisionCards(&flop, &hole, &cards_from_cache)) {
+    WriteLog("[DeepPot] MISS UNRECOVERABLE reason=cards_unavailable_no_same_hand_cache\n");
     return 0;
   }
 
-  deeppot_runtime::QueryResult result =
-      g_strategy.Query(n, actor, prior_stay_mask, flop, hole);
-  if (!result.ok) {
-    WriteLog("[DeepPot] MISS lookup: %s\n", const_cast<char*>(result.error.c_str()));
-    return 0;
+  deeppot_runtime::LiveScrapeSnapshot current = ReadRawSnapshot();
+  std::vector<std::string> normalization_reasons;
+  const bool normalized = NormalizeSnapshotForRecovery(&current, &normalization_reasons, !cards_from_cache);
+
+  if (normalized) {
+    int n = 0;
+    int actor = -1;
+    std::uint32_t stay_mask = 0;
+    std::uint32_t inferred_fold_mask = 0;
+    std::string primary_error;
+    if (BuildPrimaryPublicState(
+            current,
+            &n,
+            &actor,
+            &stay_mask,
+            &inferred_fold_mask,
+            &primary_error)) {
+      deeppot_runtime::QueryResult result = g_strategy.Query(n, actor, stay_mask, flop, hole);
+      if (result.ok) {
+        const int encoded = result.EncodedAction();
+        if (inferred_fold_mask != 0) {
+          std::ostringstream deferred;
+          deferred << "primary_missing_action_evidence_actor_mask=0x" << std::hex
+                   << inferred_fold_mask << " deferred_to_policy_recovery";
+          error = deferred.str();
+        } else {
+          if (normalization_reasons.empty() && !cards_from_cache) {
+            WriteLog(
+                "[DeepPot] HIT EXACT N=%d actor=%d scenario=%d code=%d flop=%d hole=%d action=%s\n",
+                n,
+                actor,
+                result.scenario_dense_id,
+                encoded,
+                result.flop_index,
+                result.exact_hole_state_id,
+                const_cast<char*>(result.stay ? "STAY" : "FOLD"));
+          } else {
+            std::vector<std::string> reasons = normalization_reasons;
+            if (cards_from_cache) reasons.push_back("cards_from_same_hand_cache");
+            const std::string reason_text = JoinReasons(reasons);
+            WriteLog(
+                "[DeepPot] HIT RECOVERED_PRIMARY reason=%s N=%d actor=%d scenario=%d code=%d flop=%d hole=%d action=%s\n",
+                const_cast<char*>(reason_text.c_str()),
+                n,
+                actor,
+                result.scenario_dense_id,
+                encoded,
+                result.flop_index,
+                result.exact_hole_state_id,
+                const_cast<char*>(result.stay ? "STAY" : "FOLD"));
+          }
+          return encoded;
+        }
+      } else {
+        error = "primary lookup: " + result.error;
+      }
+    } else {
+      error = primary_error;
+    }
+  } else {
+    error = "userchair unavailable with no same-hand recovery";
   }
-  const int encoded = result.EncodedAction();
+
+  // Search the closest legal PUBLIC states. Exact cards are never changed.
+  if (normalized) {
+    std::vector<deeppot_runtime::PublicStateCandidate> candidates =
+        deeppot_runtime::RecoverPublicStateCandidates(current, g_hand.snapshots, 64);
+    std::vector<deeppot_runtime::PublicStateCandidate> valid_candidates;
+    std::map<PublicKey, bool> stay_by_key;
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+      const deeppot_runtime::PublicStateCandidate& candidate = candidates[i];
+      deeppot_runtime::QueryResult q = g_strategy.Query(
+          candidate.num_players,
+          candidate.actor_index,
+          candidate.prior_stay_mask,
+          flop,
+          hole);
+      if (!q.ok) continue;
+      valid_candidates.push_back(candidate);
+      stay_by_key[CandidateKey(candidate)] = q.stay;
+    }
+
+    if (!valid_candidates.empty()) {
+      const deeppot_runtime::RecoveryConsensus consensus =
+          deeppot_runtime::WeightedPolicyConsensus(
+              valid_candidates,
+              [&stay_by_key](const deeppot_runtime::PublicStateCandidate& candidate) {
+                return stay_by_key.find(CandidateKey(candidate))->second;
+              },
+              1,
+              0.65);
+
+      bool chosen_stay = false;
+      const char* resolution = NULL;
+      if (consensus.resolved) {
+        chosen_stay = consensus.stay;
+        resolution = "CONSENSUS";
+      } else {
+        chosen_stay = stay_by_key.find(CandidateKey(valid_candidates.front()))->second;
+        resolution = "NEAREST_TIEBREAK";
+      }
+
+      const deeppot_runtime::PublicStateCandidate* chosen = &valid_candidates.front();
+      for (std::size_t i = 0; i < valid_candidates.size(); ++i) {
+        if (stay_by_key.find(CandidateKey(valid_candidates[i]))->second == chosen_stay) {
+          chosen = &valid_candidates[i];
+          break;
+        }
+      }
+      const int encoded = chosen_stay ? chosen->global_scenario_code : -chosen->global_scenario_code;
+      const std::string reason_text = JoinReasons(chosen->reasons);
+      WriteLog(
+          "[DeepPot] HIT RECOVERED_%s candidates=%d min_cost=%d stay_weight=%.3f fold_weight=%.3f chosen_cost=%d reason=%s N=%d actor=%d scenario=%d code=%d action=%s primary_error=%s\n",
+          const_cast<char*>(resolution),
+          consensus.candidate_count,
+          consensus.min_cost,
+          consensus.stay_weight,
+          consensus.fold_weight,
+          chosen->cost,
+          const_cast<char*>(reason_text.c_str()),
+          chosen->num_players,
+          chosen->actor_index,
+          chosen->scenario_dense_id,
+          encoded,
+          const_cast<char*>(chosen_stay ? "STAY" : "FOLD"),
+          const_cast<char*>(error.c_str()));
+      return encoded;
+    }
+  }
+
+  // Final operational floor: never turn a purely technical public-state failure
+  // into an automatic fold of TP+ when the exact cards are still known.
+  if (deeppot_runtime::IsTopPairOrBetter(flop, hole)) {
+    WriteLog(
+        "[DeepPot] EMERGENCY TP_PLUS -> STAY code=%d reason=public_state_unresolved primary_error=%s\n",
+        kEmergencyStayCode,
+        const_cast<char*>(error.c_str()));
+    return kEmergencyStayCode;
+  }
+
   WriteLog(
-      "[DeepPot] HIT N=%d actor=%d scenario=%d code=%d flop=%d hole=%d action=%s\n",
-      n,
-      actor,
-      result.scenario_dense_id,
-      encoded,
-      result.flop_index,
-      result.exact_hole_state_id,
-      const_cast<char*>(result.stay ? "STAY" : "FOLD"));
-  return encoded;
+      "[DeepPot] MISS UNRECOVERABLE reason=public_state_unresolved_non_TP_plus primary_error=%s\n",
+      const_cast<char*>(error.c_str()));
+  return 0;
 }
 
 }  // namespace
 
-void DLLOnLoad() {}
+void DLLOnLoad() {
+  g_hand.FullReset();
+  WriteLog("[DeepPot] adapter loaded version=%s\n", const_cast<char*>(kAdapterVersion));
+}
 void DLLOnUnLoad() {}
 void __stdcall DLLUpdateOnNewFormula() {}
-void __stdcall DLLUpdateOnConnection() {}
-void __stdcall DLLUpdateOnHandreset() {}
-void __stdcall DLLUpdateOnNewRound() {}
-void __stdcall DLLUpdateOnMyTurn() {}
-void __stdcall DLLUpdateOnHeartbeat() {}
+void __stdcall DLLUpdateOnConnection() {
+  g_hand.FullReset();
+}
+void __stdcall DLLUpdateOnHandreset() {
+  // Do not blindly erase same-hand evidence. Confirm the boundary from a
+  // non-flop transition or changed exact card identity first.
+  g_hand.pending_handreset_observations = kHandresetGraceObservations;
+  CaptureLiveObservation();
+}
+void __stdcall DLLUpdateOnNewRound() {
+  CaptureLiveObservation();
+}
+void __stdcall DLLUpdateOnMyTurn() {
+  CaptureLiveObservation();
+}
+void __stdcall DLLUpdateOnHeartbeat() {
+  CaptureLiveObservation();
+}
 
 DLL_IMPLEMENTS double __stdcall ProcessQuery(const char* pquery) {
   if (pquery == NULL) return 0.0;
   if (std::strcmp(pquery, "dll$deeppot_action") == 0) {
     return static_cast<double>(DeepPotAction());
   }
-  // DeepPot intentionally exports no second live dll$ query because OpenHoldem
-  // caches one user-DLL result per action orbit without keying by query name.
   return 0.0;
 }
 
