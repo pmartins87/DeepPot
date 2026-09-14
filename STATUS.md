@@ -4,18 +4,11 @@ Reference date: 2026-09-14
 
 ## Current live/research baseline
 
-**Live baseline: V2_SEL3500 greedy.**
+**Production-selected base: V2_SEL3500 greedy.**
 
-Reason for promotion from SEL3000:
+The finite base-policy robustness gate has now passed. SEL3500 greedy is no longer merely the provisional live baseline; it is the selected production base pending operational release/freeze.
 
-- same continuous exact CFR trajectory;
-- only 0.218121% of all actions changed from SEL3000;
-- no changes at N2–N5;
-- only 0.0139% at N6, 0.0768% at N7 and 0.3827% at N8;
-- only 49/12,285 `(N, flop)` tasks remain above 2% action change;
-- no task remains above 2.5%.
-
-SEL3500 is therefore the deepest, most stable current snapshot. Do not run SEL4000 now.
+Do not run SEL4000 now.
 
 ## Exact game/runtime status
 
@@ -50,7 +43,18 @@ The one resumable trajectory has passed:
 - selective 3000 on 1,756 tasks;
 - selective 3500 on 329 tasks.
 
-The selective schedule successfully concentrated CPU on N7/N8 difficult boards. Additional depth is paused because policy selection, not raw CFR depth, is now the main uncertainty.
+SEL3000 -> SEL3500:
+
+- 1,386,540 action changes;
+- 0.218121% global change;
+- N2–N5: 0%;
+- N6: 0.0139%;
+- N7: 0.0768%;
+- N8: 0.3827%;
+- only 49/12,285 `(N, flop)` tasks remain above 2% change;
+- none remain above 2.5%.
+
+Additional depth is paused because the robustness gate did not reveal a convergence problem that justifies SEL4000.
 
 ## Mixing structure
 
@@ -91,7 +95,53 @@ Overall:
 - mean EV(greedy)-EV(mixed) vs the CFR profile: +0.06636 ante/hand;
 - Pearson `p(STAY)` vs `EV(STAY-FOLD)`: 0.7459.
 
-Interpretation: the user's hypothesis is strongly supported outside the marginal 50–60% region, but this is still an audit against CFR-derived opponents, not the real KKPoker population.
+This audit supported the greedy hypothesis but was not the final release criterion.
+
+## Base-policy robustness gate — PASS
+
+Frozen protocol:
+
+`docs/BASE_POLICY_ROBUSTNESS_GATE_20260914.md`
+
+Formal result:
+
+`docs/BASE_POLICY_ROBUSTNESS_RESULT_20260914.md`
+
+Protocol actually run:
+
+- 28 tasks = 4 canonical flops per N=2..8;
+- 1,500 common-random deals/task;
+- Hero candidates: mixed, greedy, hybrid60/70/80/90;
+- opponent families: cfr_mixed, cfr_greedy, tight, loose, sharpened, flattened, early_tight_late_loose, early_loose_late_tight;
+- gross rake 2% provisional;
+- +0.70% Hero cashback on contribution;
+- read-only: no solver/runtime state modified.
+
+### Winning candidate: greedy
+
+EV delta vs mixed CFR:
+
+- mean: **+0.10162 ante/hand**;
+- worst population: **+0.09600**;
+- worst N: **+0.02219**;
+- cells > 0: **100.0%**;
+- significant positive cells: **100.0%**;
+- significant negative cells: **0.0%**;
+- mean candidate regret: **0.00137**;
+- max candidate regret: **0.01085**.
+
+By N, greedy remained positive from N2 (+0.02219) through N8 (+0.20225). By population, its weakest aggregate was the `tight` family at +0.09600.
+
+Greedy beat every hybrid on mean EV and also had lower mean/max candidate regret. Therefore no hybrid confirmation gate is triggered.
+
+### Production interpretation
+
+- keep **V2_SEL3500 greedy**;
+- do not implement mixed/hybrid runtime for the base release;
+- do not apply static EV overrides;
+- do not run SEL4000 now.
+
+The synthetic opponent families are robustness stress tests, not claims about the actual KKPoker population.
 
 ## Static EV/BR policy
 
@@ -113,56 +163,26 @@ Solver economics remain provisional:
 
 Do not convert this into a 1% gross-rake model. The cashback is player-specific and contribution/PVI-dependent.
 
-Rakeback sensitivity audits showed only small action effects concentrated near marginal states; it is not the main current policy-selection issue.
-
-## Current gate — mixed vs greedy vs hybrid
-
-The project is now testing whether the practical greedy projection remains robust when opponents are fixed/non-adaptive but deviate systematically from CFR.
-
-Frozen protocol:
-
-`docs/BASE_POLICY_ROBUSTNESS_GATE_20260914.md`
-
-New tool:
-
-`tools/analyze_policy_robustness_SEL3500.ps1`
-
-Hero candidates:
-
-- mixed;
-- greedy;
-- hybrid60;
-- hybrid70;
-- hybrid80;
-- hybrid90.
-
-Fixed opponent families:
-
-- CFR mixed;
-- CFR greedy;
-- tighter;
-- looser;
-- sharpened;
-- flattened;
-- early-tight/late-loose;
-- early-loose/late-tight.
-
-The gate is finite and read-only. It does not change CFR state, snapshots, DLL, TXT or runtime bitsets.
-
 ## Population exploitation
 
 Not started and not yet justified.
 
 The DeepKK exploitation architecture relied on a dedicated opponent/player database, not merely OpenHoldem session logs. For Pot Fold, a meaningful global exploit layer would need structured conditional data and treatment of hidden folded hands. OpenHoldem logs alone are insufficient to reconstruct high-quality population ranges.
 
-Decision: resolve the base policy first. Only build a population database/exploit layer later if measured deviations suggest enough additional EV to justify the complexity.
+Decision: complete the production-base release first. Only build a population database/exploit layer later if measured deviations suggest enough additional EV to justify the complexity.
 
-## Next command on Ryzen 9
+## Current gate — production release/freeze
 
-```powershell
-cd C:\DeepPot
-git pull
-powershell -ExecutionPolicy Bypass -File .\tools\analyze_policy_robustness_SEL3500.ps1
-```
+Base-policy selection is closed. The current work is now operational D4 release/freeze of V2_SEL3500 greedy:
 
-Do not run SEL4000. Do not apply static EV overrides.
+1. identify/generate exact SEL3500 greedy runtime artifacts from the canonical state;
+2. freeze hashes and source revision;
+3. rerun the existing mathematical-to-runtime equivalence path on those release artifacts;
+4. verify the OpenHoldem package on the i5 without altering the known-good tablemap/formula behavior;
+5. freeze the production package after PASS.
+
+No mixed/hybrid runtime work is needed.
+
+## Next action on Ryzen 9
+
+Pull the documentation update first. Then continue with the D4 production-release tooling/instructions supplied next; do not run SEL4000.
