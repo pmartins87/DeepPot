@@ -8,9 +8,9 @@ import random
 from pathlib import Path
 
 from deeppot import continuous_training_fast_v2 as ct
-from deeppot.cards import full_deck
 from deeppot.continuous_runner_fast_v2 import production_source_sha256
 from deeppot.multiway_response import MultiwayResponseValidator
+from deeppot.state_space import decision_scenario_count
 
 
 def _load_candidates(path: Path, top_per_n: int, n_min: int, n_max: int) -> list[dict]:
@@ -24,15 +24,19 @@ def _load_candidates(path: Path, top_per_n: int, n_min: int, n_max: int) -> list
     return out
 
 
-def _mean_ci95(values: list[float]) -> tuple[float, float]:
-    if not values:
-        return 0.0, float("inf")
-    mean = sum(values) / len(values)
-    if len(values) <= 1:
-        return mean, float("inf")
-    var = sum((x - mean) ** 2 for x in values) / (len(values) - 1)
-    se = math.sqrt(var / len(values))
-    return mean, 1.959963984540054 * se
+def _weighted_mean_ci95(samples: list[tuple[float, float]]) -> tuple[float, float, float]:
+    sum_w = sum(w for _, w in samples)
+    sum_w2 = sum(w * w for _, w in samples)
+    if sum_w <= 0.0 or sum_w2 <= 0.0:
+        return 0.0, float("inf"), 0.0
+    mean = sum(x * w for x, w in samples) / sum_w
+    second = sum(x * x * w for x, w in samples) / sum_w
+    var = max(0.0, second - mean * mean)
+    n_eff = (sum_w * sum_w) / sum_w2
+    if n_eff <= 1.0:
+        return mean, float("inf"), n_eff
+    stderr = math.sqrt(var / n_eff)
+    return mean, 1.959963984540054 * stderr, n_eff
 
 
 def _sample_keys(rng: random.Random, population: list[int], k: int) -> list[int]:
@@ -50,7 +54,7 @@ def _conditional_gap_samples(
     rng: random.Random,
     representative_hole: dict[int, tuple],
     node_by_public: dict[int, int],
-) -> list[float]:
+) -> list[tuple[float, float]]:
     node_idx = node_by_public[public_id]
     node = validator.nodes[node_idx]
     assert node.actor is not None
@@ -63,7 +67,8 @@ def _conditional_gap_samples(
     n = validator.num_players
     values = [0.0] * (len(validator.nodes) * n)
     p_stay_by_node = [0.0] * len(validator.nodes)
-    gaps: list[float] = []
+    reach = [0.0] * len(validator.nodes)
+    out: list[tuple[float, float]] = []
 
     for _ in range(samples):
         picked = rng.sample(available, need)
@@ -84,9 +89,13 @@ def _conditional_gap_samples(
             values=values,
             p_stay_by_node=p_stay_by_node,
         )
+        validator._fill_reach(p_stay_by_node, reach)
+        weight = reach[node_idx]
+        if weight <= 0.0:
+            continue
         gap = values[node.stay_child * n + actor] - values[node.fold_child * n + actor]
-        gaps.append(gap)
-    return gaps
+        out.append((gap, weight))
+    return out
 
 
 def _task_report(
@@ -101,6 +110,7 @@ def _task_report(
     pvi_factors: list[float],
     nominal_rb: float,
     rake_pct: float,
+    min_effective_visits: float,
     seed: int,
 ) -> dict:
     config = ct.ContinuousConfig(
@@ -111,9 +121,7 @@ def _task_report(
         linear_average=True,
     )
     solver, iterations = ct.load_state(root=root, task=task, config=config, source_sha256=source_sha)
-    expected = task.n and (len(solver.nodes) if False else 0)
-    scenarios = __import__("deeppot.state_space", fromlist=["decision_scenario_count"]).decision_scenario_count(task.n)
-    expected = scenarios * solver.hole_state_count
+    expected = decision_scenario_count(task.n) * solver.hole_state_count
 
     policy: dict[int, tuple[float, float]] = {}
     all_fold: list[int] = []
@@ -159,7 +167,7 @@ def _task_report(
         for key in keys:
             public_id, hole_state_id = divmod(key, solver.hole_state_count)
             p_stay = policy[key][1]
-            gaps = _conditional_gap_samples(
+            weighted_samples = _conditional_gap_samples(
                 validator=validator,
                 public_id=public_id,
                 hole_state_id=hole_state_id,
@@ -168,7 +176,8 @@ def _task_report(
                 representative_hole=representative_hole,
                 node_by_public=node_by_public,
             )
-            mean_gap, ci95 = _mean_ci95(gaps)
+            mean_gap, ci95, n_eff = _weighted_mean_ci95(weighted_samples)
+            eligible = n_eff >= min_effective_visits
             record = {
                 "key": key,
                 "public_id": public_id,
@@ -177,18 +186,23 @@ def _task_report(
                 "solver_p_stay": p_stay,
                 "baseline_gap": mean_gap,
                 "ci95": ci95,
+                "effective_visits": n_eff,
+                "eligible": int(eligible),
                 "factors": {},
             }
             for factor in pvi_factors:
                 cashback = rake_pct * nominal_rb * factor
                 shift = task.n * cashback
                 rebate_gap = mean_gap + shift
+                flip = int(mean_gap <= 0.0 < rebate_gap)
                 record["factors"][f"{factor:.4f}"] = {
                     "gap_shift": shift,
                     "rebate_gap": rebate_gap,
-                    "fold_to_stay_flip": int(mean_gap <= 0.0 < rebate_gap),
+                    "fold_to_stay_flip": flip,
+                    "eligible_fold_to_stay_flip": int(bool(flip) and eligible),
                     "confident_reversal": int(
-                        math.isfinite(ci95)
+                        eligible
+                        and math.isfinite(ci95)
                         and mean_gap + ci95 < 0.0
                         and rebate_gap - ci95 > 0.0
                     ),
@@ -202,13 +216,21 @@ def _task_report(
         agg = {}
         for stratum in ("marginal_fold", "random_fold"):
             rr = [r for r in rows if r["stratum"] == stratum]
-            flips = sum(r["factors"][fk]["fold_to_stay_flip"] for r in rr)
+            eligible_rr = [r for r in rr if r["eligible"]]
+            flips_all = sum(r["factors"][fk]["fold_to_stay_flip"] for r in rr)
+            flips_eligible = sum(r["factors"][fk]["eligible_fold_to_stay_flip"] for r in rr)
             conf = sum(r["factors"][fk]["confident_reversal"] for r in rr)
             agg[stratum] = {
                 "sampled_states": len(rr),
-                "fold_to_stay_flips": flips,
-                "flip_pct": 100.0 * flips / max(1, len(rr)),
+                "eligible_states": len(eligible_rr),
+                "fold_to_stay_flips_all": flips_all,
+                "flip_pct_all": 100.0 * flips_all / max(1, len(rr)),
+                "fold_to_stay_flips_eligible": flips_eligible,
+                "flip_pct_eligible": 100.0 * flips_eligible / max(1, len(eligible_rr)),
                 "confident_reversals": conf,
+                "mean_effective_visits": (
+                    sum(float(r["effective_visits"]) for r in rr) / len(rr) if rr else 0.0
+                ),
             }
         aggregate[fk] = agg
 
@@ -221,6 +243,7 @@ def _task_report(
         "marginal_fold_states_population": len(marginal_fold),
         "marginal_low": marginal_low,
         "samples_per_state": samples_per_state,
+        "min_effective_visits": min_effective_visits,
         "aggregate": aggregate,
         "rows": rows,
     }
@@ -233,10 +256,11 @@ def main() -> None:
     ap.add_argument("--top-per-n", type=int, default=3)
     ap.add_argument("--n-min", type=int, default=5)
     ap.add_argument("--n-max", type=int, default=8)
-    ap.add_argument("--samples-per-state", type=int, default=150)
-    ap.add_argument("--random-fold-states", type=int, default=75)
-    ap.add_argument("--marginal-fold-states", type=int, default=75)
+    ap.add_argument("--samples-per-state", type=int, default=250)
+    ap.add_argument("--random-fold-states", type=int, default=50)
+    ap.add_argument("--marginal-fold-states", type=int, default=50)
     ap.add_argument("--marginal-low", type=float, default=0.40)
+    ap.add_argument("--min-effective-visits", type=float, default=25.0)
     ap.add_argument("--seed", type=int, default=92741)
     ap.add_argument("--rake", type=float, default=0.02)
     ap.add_argument("--nominal-rb", type=float, default=0.50)
@@ -260,7 +284,9 @@ def main() -> None:
     print(f"  tasks: {len(candidates)} | samples/state: {args.samples_per_state}")
     print(f"  per task: up to {args.marginal_fold_states} marginal FOLD + {args.random_fold_states} random FOLD states")
     print(f"  marginal band: p(STAY) in [{args.marginal_low:.2f}, 0.50)")
+    print(f"  min effective visits/state: {args.min_effective_visits:.1f}")
     print(f"  PVI factors: {', '.join(f'{x:.2f}' for x in factors)}")
+    print("  public-history posterior is reach-weighted")
     print("  read-only: persistent CFR state/RNG/snapshots are not modified")
 
     reports = []
@@ -279,6 +305,7 @@ def main() -> None:
             pvi_factors=factors,
             nominal_rb=args.nominal_rb,
             rake_pct=args.rake,
+            min_effective_visits=args.min_effective_visits,
             seed=args.seed + i * 100003,
         )
         report["prior_changed_pct"] = float(row["changed_pct"])
@@ -288,8 +315,10 @@ def main() -> None:
         print(
             f"  [{i:02d}/{len(candidates):02d}] N={n} flop={flop_index:04d} "
             f"prior_change={float(row['changed_pct']):.4f}% "
-            f"marginal flips={a['marginal_fold']['fold_to_stay_flips']}/{a['marginal_fold']['sampled_states']} "
-            f"random flips={a['random_fold']['fold_to_stay_flips']}/{a['random_fold']['sampled_states']}",
+            f"marginal eligible flips={a['marginal_fold']['fold_to_stay_flips_eligible']}/"
+            f"{a['marginal_fold']['eligible_states']} "
+            f"random eligible flips={a['random_fold']['fold_to_stay_flips_eligible']}/"
+            f"{a['random_fold']['eligible_states']}",
             flush=True,
         )
 
@@ -298,19 +327,24 @@ def main() -> None:
         fk = f"{factor:.4f}"
         overall[fk] = {}
         for stratum in ("marginal_fold", "random_fold"):
-            denom = sum(r["aggregate"][fk][stratum]["sampled_states"] for r in reports)
-            flips = sum(r["aggregate"][fk][stratum]["fold_to_stay_flips"] for r in reports)
+            sampled = sum(r["aggregate"][fk][stratum]["sampled_states"] for r in reports)
+            eligible = sum(r["aggregate"][fk][stratum]["eligible_states"] for r in reports)
+            flips_all = sum(r["aggregate"][fk][stratum]["fold_to_stay_flips_all"] for r in reports)
+            flips_eligible = sum(r["aggregate"][fk][stratum]["fold_to_stay_flips_eligible"] for r in reports)
             conf = sum(r["aggregate"][fk][stratum]["confident_reversals"] for r in reports)
             overall[fk][stratum] = {
-                "sampled_states": denom,
-                "fold_to_stay_flips": flips,
-                "flip_pct": 100.0 * flips / max(1, denom),
+                "sampled_states": sampled,
+                "eligible_states": eligible,
+                "fold_to_stay_flips_all": flips_all,
+                "flip_pct_all": 100.0 * flips_all / max(1, sampled),
+                "fold_to_stay_flips_eligible": flips_eligible,
+                "flip_pct_eligible": 100.0 * flips_eligible / max(1, eligible),
                 "confident_reversals": conf,
             }
 
     payload = {
         "format": "DeepPot conditional exact-infoset rakeback sensitivity audit",
-        "method": "condition on sampled exact infoset; Monte Carlo opponent private cards+turn+river; integrate future actions with persisted CFR average policy",
+        "method": "condition on sampled exact infoset; Monte Carlo opponent private cards+turn+river; weight by probability of observed prior public actions under persisted CFR average policy; integrate future actions with that same average policy",
         "analysis_csv": str(analysis_csv),
         "rake_pct": args.rake,
         "nominal_rakeback": args.nominal_rb,
@@ -329,8 +363,9 @@ def main() -> None:
         for stratum in ("marginal_fold", "random_fold"):
             a = overall[fk][stratum]
             print(
-                f"    {stratum}: flips={a['fold_to_stay_flips']}/{a['sampled_states']} "
-                f"({a['flip_pct']:.3f}%) confident={a['confident_reversals']}"
+                f"    {stratum}: eligible flips={a['fold_to_stay_flips_eligible']}/{a['eligible_states']} "
+                f"({a['flip_pct_eligible']:.3f}%) confident={a['confident_reversals']} "
+                f"[all sampled flips={a['fold_to_stay_flips_all']}/{a['sampled_states']}]"
             )
     print(f"\nJSON: {out_json}")
 
