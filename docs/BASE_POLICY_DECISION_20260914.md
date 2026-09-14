@@ -2,64 +2,109 @@
 
 Date: 2026-09-14
 
-## Decision
+## Current decision
 
-For DeepPot, the production base must remain CFR-derived rather than a static best response to the CFR profile.
+The production base must remain **CFR-derived**. A static best response to the solver's own CFR profile is diagnostic only and is not authorized to overwrite the production base.
 
-The DeepKK-style EV/CI machinery remains useful as a diagnostic tool, but it is no longer authorized to override the DeepPot production base merely because EV(FOLD) or EV(STAY) is higher against opponents fixed to the solver CFR policy.
+The current live baseline is now **V2_SEL3500 greedy** because SEL3500 is a continuation of the same exact CFR trajectory, differs from SEL3000 in only 0.218121% of all actions, and further reduced the remaining instability without changing the game model.
 
-This decision supersedes the DeepKK-parity release rule only for the final DeepPot base-policy selection. It does not invalidate prior CFR training, stability work, or EV diagnostics.
+Do not run SEL4000 at this stage. The next gate is policy-selection robustness, not additional CFR depth.
 
-## Why
+## Why static EV/BR-to-CFR is not the production answer
 
-A static EV best response is conditional on an opponent model. In the current evaluator, the opponent model is the solver's own average mixed CFR policy. That is an internally coherent hypothetical profile, but it is not evidence that the actual KKPoker population follows that profile.
+A best response is conditional on an opponent model. The DeepKK-style evaluator integrates opponents using the full mixed CFR policy and chooses the Hero action with the highest conditional EV when statistically confident. That is coherent against CFR opponents, but it is not evidence that the real KKPoker population follows that profile.
 
-DeepKK could justify a best-response-oriented operational layer because later opponent-specific tracking could move the model away from the CFR prior as observations accumulated. DeepPot is intentionally not implementing that large opponent-model/exploitation layer at this stage. Therefore a permanent static best response to the solver profile would optimize against a fixed hypothetical population without an adaptation mechanism.
+DeepKK could later move away from the CFR prior because it had an opponent/player database and exploitation layer. DeepPot intentionally does not yet have an equivalent population database. Therefore a permanent BR to a fixed CFR opponent profile would optimize against a hypothetical population with no adaptation mechanism.
 
-For unknown opponents, the CFR-derived self-play policy is the more robust base. In two-player zero-sum settings, an exact Nash strategy has the standard minimax/near-unexploitable interpretation. DeepPot N>2 does not inherit that full theorem: multiplayer CFR/self-play should be described as an approximate self-play equilibrium candidate, not as a formal guarantee of Nash or unexploitable play.
+EV/CI remains valuable for diagnostics and targeted investigations. It is not an automatic production override.
 
-## Critical distinction: mixed CFR vs greedy CFR
+## Mixed CFR vs greedy CFR
 
-The true solver output is the average mixed CFR policy p(FOLD), p(STAY) at every exact infoset.
+The true average CFR output is a mixed policy `p(FOLD), p(STAY)` at each exact infoset.
 
-The current live snapshots are a deterministic projection:
+The live runtime uses a deterministic projection:
 
-- STAY if p(STAY) >= 0.5;
+- STAY if `p(STAY) >= 0.5`;
 - otherwise FOLD.
 
-That greedy bitset is not mathematically identical to the mixed CFR strategy and does not inherit all equilibrium properties of the mixed policy.
+This greedy projection is not identical to the mixed CFR policy and does not inherit every equilibrium property of the mix.
 
-Crucially, p(STAY) > 0.5 is not a confidence score that STAY has higher EV against an arbitrary real population. In an exact equilibrium, actions that remain in the support can be approximately indifferent against the equilibrium opponent profile even if their mixing frequencies are not 50/50. Therefore "choose the most probable CFR action" is a deterministic heuristic/projection, not a theorem that the selected action is universally best.
+However, recent SEL3500 measurements materially strengthen the practical case for greedy outside the near-50/50 region.
 
-If real opponents never adapt to Hero, the anti-exploitation value of exact mixing is less operationally important than against adaptive opponents. However that fact alone still does not prove greedy is superior: the best deterministic action would be the best response to the actual fixed population, which is currently unknown. Without such a population model, mixed CFR provides more game-theoretic robustness; greedy CFR may still be an excellent practical approximation and currently has strong live evidence.
+### Mixing-structure audit
 
-The DeepKK EV evaluator also did not assume that every villain used the greedy action. Its recursive expected-utility calculation integrated future actions using the full mixed policy probabilities. The final DeepKK export then made a deterministic decision: confident EV-best action when available, otherwise greedy average-CFR action.
+Across all 635,675,248 exact infosets:
 
-## Current DeepPot status
+- average CFR near-pure (<=1% or >=99%): 8.030%;
+- average CFR mixed 10–90: 40.917%;
+- average CFR 45–55: 2.723%;
+- current regret-matching mixed 10–90: 32.237%;
+- average-greedy vs current-greedy side disagreement: 4.823%.
 
-- V2_SEL2500 performed very well in live play and remains a valid historical operational baseline.
-- V2_SEL3000 is the preferred current live/research baseline unless live evidence shows a regression.
-- The seven high-sample EV mismatches found after SEL3000 are diagnostics, not authorized policy overrides. They show disagreement between deterministic greedy projection and a best response to the solver profile; they do not prove that the greedy action is inferior against the real population.
-- The observed cashback is approximately 0.70% of Hero contribution. Rebate sensitivity did not materially change the mismatch set.
-- SEL3500 was started before this clarification. It may finish as a convergence/stability experiment because it only continues the 329 least-stable independent (N, flop) CFR tasks on their existing trajectory. Completion does not automatically promote SEL3500 to live production and is no longer justified as a way to force agreement with EV/BR-to-CFR.
+The mixed mass is not merely historical averaging residue: among average-CFR 10–90 states, 77.49% are still mixed in current regret matching. Therefore mixed CFR cannot be dismissed wholesale as stale noise.
 
-## New improvement path
+### Frequency-vs-EV alignment audit
 
-1. Keep V2_SEL3000 as the current live baseline.
-2. Allow the already-started SEL3500 continuation to finish, but treat it strictly as a research convergence snapshot until compared with SEL3000.
-3. Do not apply EV/BR-to-CFR overrides to production.
-4. Measure the structure of the average mixed CFR policy: distribution of p(STAY), especially mass near 0.5 and how it changes from SEL3000 to SEL3500.
-5. Compare mixed CFR and greedy CFR offline under multiple opponent families rather than one CFR opponent model. Include at minimum: mixed-CFR opponents, greedy-CFR opponents, systematically tighter populations, systematically looser populations, and perturbations by public scenario/position.
-6. Evaluate both average EV and downside/robustness across those opponent families. Greedy should only replace mixed as a theoretically preferred base if it demonstrates a robust advantage, not merely because p(action) is larger.
-7. If real population data later becomes rich enough to estimate conditional ranges/actions, exploitation can be layered on top of the CFR base. Ambiguity or insufficient data must fall back to the frozen CFR-derived base.
+Against opponents fixed to SEL3500 mixed CFR, the CFR majority action matched the point-estimate EV-best pure action increasingly often as majority frequency moved away from 50%:
+
+- 50–55%: 40.0%;
+- 55–60%: 56.7%;
+- 60–70%: 68.3%;
+- 70–80%: 77.4%;
+- 80–90%: 96.7%;
+- 90–95%: 100%;
+- 95–99%: 100%;
+- 99–100%: 100%.
+
+Among statistically confident states overall, the majority action matched EV-best 97.12%. Greedy also beat mixed by +0.06636 ante/hand on average in that sampled CFR-opponent environment.
+
+This strongly supports the user's practical hypothesis that majority frequency is often a useful proxy for action quality, especially once the majority is strong. It still does **not** prove that the majority action is best against the actual KKPoker population.
+
+## SEL3500 convergence status
+
+SEL3000 -> SEL3500 changed only 1,386,540 of 635,675,248 actions = **0.218121%**.
+
+By N:
+
+- N2: 0.0000%;
+- N3: 0.0000%;
+- N4: 0.0000%;
+- N5: 0.0000%;
+- N6: 0.0139%;
+- N7: 0.0768%;
+- N8: 0.3827%.
+
+Only 49/12,285 tasks remained above 2% action change; none remained above 2.5%. This is sufficient to freeze additional CFR depth for now.
+
+## Rakeback/economy note
+
+The solver track still uses provisional gross rake = 2%, uncapped. The live data showed approximately **0.70% cashback on Hero contribution** from the user's nominal 50% rakeback. Conditional sensitivity tests found that this observed cashback changed only a small fraction of marginal action comparisons and did not explain the main greedy-vs-EV disagreements.
+
+Do not simplify the economics by replacing 2% gross rake with 1% rake. Rake is removed from the pot first; cashback is player-specific and contribution/PVI-dependent.
+
+## Current improvement path
+
+1. **Live baseline:** V2_SEL3500 greedy.
+2. **No SEL4000 now.**
+3. **No automatic EV overrides.**
+4. Resolve `mixed vs greedy vs hybrid` with the finite robustness gate in `docs/BASE_POLICY_ROBUSTNESS_GATE_20260914.md`.
+5. The gate compares Hero mixed, greedy and hybrid purification policies against multiple fixed/non-adaptive opponent families derived from SEL3500, not just CFR opponents.
+6. Only after the base policy is resolved decide whether a population-exploitation project is worth its complexity.
+
+## Population exploitation
+
+OpenHoldem logs alone are not enough to build a high-quality population best response because folded hole cards are censored and the logs do not provide a complete conditional range database.
+
+A real exploit layer would require a structured database of public scenario, N, actor/position, board, action, showdown/revealed hole cards and sample confidence, with a principled treatment of hidden folds. If such a database later demonstrates stable, material deviations, exploitation may be layered conservatively on top of the frozen base with fallback to base.
+
+Until then, do not create a global exploitation layer merely because it is technically possible.
 
 ## Release principle
 
-For DeepPot without opponent-specific adaptation:
-
 - mixed CFR: theoretical robustness reference;
-- greedy CFR: current practical/live baseline and deterministic projection;
-- static best response to CFR: diagnostic only;
-- population best response: future exploit layer only if supported by real conditional population data.
+- greedy CFR: current practical/live baseline;
+- hybrid CFR: candidate if robustness testing shows a better trade-off;
+- static BR to CFR: diagnostic only;
+- population BR: future exploit layer only if real conditional population data supports it.
 
-No source-locked mathematical file, CFR state, RNG trajectory, existing snapshot, DLL, or live formula is modified by this decision document.
+No source-locked mathematical file, CFR state, RNG trajectory, existing snapshot, DLL or live formula is modified by this decision document.
