@@ -155,13 +155,27 @@ Status: **ACTIVE — CURRENT NEXT GATE**
 
 Policy selection is complete. The next finite step is operational release/freeze of **V2_SEL3500 greedy** using the existing deterministic runtime architecture.
 
-Required release work:
+The dedicated read-only release-equivalence tool is now:
 
-1. identify/generate the exact SEL3500 greedy runtime artifacts from the canonical continuous state;
-2. freeze their hashes and source snapshot/revision;
-3. run the existing mathematical-to-runtime equivalence path on the release artifacts;
-4. verify the OpenHoldem package on the i5 without changing the known-good tablemap/formula behavior;
-5. freeze the production package only after those checks pass.
+`tools/verify_deeppot_sel3500_release.ps1`
+
+It exhaustively checks the immutable `V2_SEL3500` snapshot against the continuous CFR source:
+
+- all 1,755 canonical flop slots per N;
+- all runtime index card-code/hole-width metadata;
+- all seven N2..N8 greedy runtime bitsets byte-for-byte against the source task bitsets;
+- all 635,675,248 exact infosets accounted for;
+- release hashes recorded in JSON.
+
+Run:
+
+```powershell
+cd C:\DeepPot
+git pull
+powershell -ExecutionPolicy Bypass -File .\tools\verify_deeppot_sel3500_release.ps1
+```
+
+If PASS, the next and final operational check is live i5 validation using the verified `DeepPotRuntime`. **Do not replace the already-known-good i5 `DeepPot.txt` merely because the snapshot contains a generated formula.** Keep the validated formula/tablemap/user.dll path unless a specific incompatibility is found.
 
 No mixed/hybrid runtime work is needed. Do not start SEL4000 merely because D3 is closed.
 
@@ -190,4 +204,4 @@ Only open this track if real data shows stable, material population deviations l
 
 ## Immediate next action
 
-Proceed with **D4 production-base release/freeze for V2_SEL3500 greedy**. Do **not** run SEL4000, do **not** build a mixed/hybrid runtime, and do **not** apply static BR-to-CFR EV overrides.
+Run only the D4 SEL3500 release-equivalence command above on the Ryzen 9. Do **not** run SEL4000, do **not** build a mixed/hybrid runtime, do **not** apply static BR-to-CFR EV overrides, and do **not** change the i5 live formula yet.
