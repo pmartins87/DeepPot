@@ -1,7 +1,8 @@
 param(
-    [int]$SamplesPerState = 150,
-    [int]$RandomFoldStates = 75,
-    [int]$MarginalFoldStates = 75
+    [int]$SamplesPerState = 250,
+    [int]$RandomFoldStates = 50,
+    [int]$MarginalFoldStates = 50,
+    [double]$MinEffectiveVisits = 25.0
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,6 +30,7 @@ $args = @(
     "--samples-per-state", "$SamplesPerState",
     "--random-fold-states", "$RandomFoldStates",
     "--marginal-fold-states", "$MarginalFoldStates",
+    "--min-effective-visits", "$MinEffectiveVisits",
     "--top-per-n", "3",
     "--n-min", "5",
     "--n-max", "8",
@@ -40,6 +42,7 @@ $args = @(
 Write-Host "DeepPot CONDITIONAL rakeback sensitivity audit" -ForegroundColor Green
 Write-Host "  fixes the zero-eligible coverage problem in the first audit"
 Write-Host "  conditions directly on sampled exact infosets from persisted CFR state"
+Write-Host "  weights opponent-card samples by prior public-history reach"
 Write-Host "  read-only: no CFR state, RNG or snapshot is modified"
 Write-Host ""
 
