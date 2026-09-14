@@ -6,7 +6,7 @@ Reference date: 2026-09-14
 
 **Production-selected base: V2_SEL3500 greedy.**
 
-The finite base-policy robustness gate has now passed. SEL3500 greedy is no longer merely the provisional live baseline; it is the selected production base pending operational release/freeze.
+The finite base-policy robustness gate has passed. SEL3500 greedy is no longer merely the provisional live baseline; it is the selected production base pending operational release/freeze.
 
 Do not run SEL4000 now.
 
@@ -18,7 +18,7 @@ Do not run SEL4000 now.
 - 635,675,248 exact infosets;
 - no strategic card abstraction;
 - exact runtime lookup through `DeepPot.txt + user.dll + DeepPotRuntime`;
-- mathematical -> runtime equivalence previously passed with 0 mismatches;
+- mathematical -> runtime equivalence previously passed with 0 mismatches on the earlier base runtime;
 - i5 remains the live KKPoker/OpenHoldem machine;
 - Ryzen 9 remains the solver/analysis machine.
 
@@ -171,18 +171,34 @@ The DeepKK exploitation architecture relied on a dedicated opponent/player datab
 
 Decision: complete the production-base release first. Only build a population database/exploit layer later if measured deviations suggest enough additional EV to justify the complexity.
 
-## Current gate — production release/freeze
+## Current gate — D4 production release/freeze
 
-Base-policy selection is closed. The current work is now operational D4 release/freeze of V2_SEL3500 greedy:
+A dedicated SEL3500 read-only equivalence verifier has now been added:
 
-1. identify/generate exact SEL3500 greedy runtime artifacts from the canonical state;
-2. freeze hashes and source revision;
-3. rerun the existing mathematical-to-runtime equivalence path on those release artifacts;
-4. verify the OpenHoldem package on the i5 without altering the known-good tablemap/formula behavior;
-5. freeze the production package after PASS.
+- `src/deeppot/continuous_runtime_equivalence.py`;
+- `tools/verify_deeppot_sel3500_release.ps1`.
 
-No mixed/hybrid runtime work is needed.
+It verifies the existing immutable `V2_SEL3500` snapshot directly against the continuous CFR source, not against the old Base-v1 run. It checks all 1,755 flop slots per N, runtime index metadata, every source greedy bitset against the release bitsets, and accounts for all 635,675,248 exact infosets.
+
+This is the current Ryzen 9 command:
+
+```powershell
+cd C:\DeepPot
+git pull
+powershell -ExecutionPolicy Bypass -File .\tools\verify_deeppot_sel3500_release.ps1
+```
+
+Expected PASS conditions:
+
+- total infosets = 635,675,248;
+- action bit mismatches = 0;
+- index metadata mismatches = 0;
+- unknown supported keys = 0.
+
+If this passes, the next step is i5 live validation with the verified `DeepPotRuntime`.
+
+**Important:** do not replace the already-known-good i5 `DeepPot.txt`, tablemap or `user.dll` at this point just because the SEL3500 snapshot contains generated live files. The first live deployment change should be only the verified `DeepPotRuntime` folder unless a specific compatibility issue is identified.
 
 ## Next action on Ryzen 9
 
-Pull the documentation update first. Then continue with the D4 production-release tooling/instructions supplied next; do not run SEL4000.
+Run the D4 release-equivalence command above and paste the final PASS/output block. Do not run SEL4000.
