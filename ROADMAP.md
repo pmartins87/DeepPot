@@ -13,6 +13,7 @@ Authoritative current policy docs:
 - `docs/DEEPPOT_DEEPKK_METHOD_LOCK.md`;
 - `docs/BASE_POLICY_DECISION_20260914.md`;
 - `docs/BASE_POLICY_ROBUSTNESS_GATE_20260914.md`;
+- `docs/BASE_POLICY_ROBUSTNESS_RESULT_20260914.md`;
 - `docs/CONTINUOUS_TRAINING_V2.md`;
 - `docs/CONTINUOUS_FAST_V2_GATE.md`.
 
@@ -121,52 +122,48 @@ SEL3000 -> SEL3500:
 
 ## D3 — Base-policy selection
 
-Status: **ACTIVE — CURRENT NEXT GATE**
+Status: **PASS / CLOSED**
 
-Current live baseline: **V2_SEL3500 greedy**.
+Selected production base: **V2_SEL3500 greedy**.
 
-Policy candidates:
+The frozen robustness gate compared mixed, greedy and hybrid60/70/80/90 against eight fixed/non-adaptive opponent families across 28 tasks with 1,500 common-random deals/task.
 
-1. mixed average CFR;
-2. greedy majority action;
-3. hybrid purification (60/70/80/90 majority thresholds).
+Greedy versus mixed:
 
-What is already known:
+- mean EV delta: **+0.10162 ante/hand**;
+- worst population mean: **+0.09600**;
+- worst N mean: **+0.02219**;
+- cells > 0: **100%**;
+- significant positive cells: **100%**;
+- significant negative cells: **0%**;
+- mean candidate regret: **0.00137**;
+- max candidate regret: **0.01085**.
 
-- average CFR retains substantial real mixing; mixing cannot be dismissed as averaging residue;
-- against mixed-CFR opponents, CFR majority frequency strongly aligns with EV-best as the majority moves away from 50%;
-- 90–100% majority states matched the sampled EV-best action essentially perfectly;
-- the near-50/50 region is the weak point for greedy;
-- static BR-to-CFR is not an authorized production override.
+Greedy also beat every hybrid on mean EV and had the lowest mean/max candidate regret among purified candidates. No hybrid confirmation gate is justified.
 
-### Next finite gate
+Formal result:
 
-Run:
+`docs/BASE_POLICY_ROBUSTNESS_RESULT_20260914.md`
 
-```powershell
-cd C:\DeepPot
-git pull
-powershell -ExecutionPolicy Bypass -File .\tools\analyze_policy_robustness_SEL3500.ps1
-```
-
-Frozen protocol: `docs/BASE_POLICY_ROBUSTNESS_GATE_20260914.md`.
-
-It compares mixed, greedy and hybrid Hero policies against multiple fixed/non-adaptive opponent families: CFR mixed, CFR greedy, tighter, looser, sharpened, flattened and two position-dependent perturbations.
-
-No training or production files are modified.
+Static BR-to-CFR remains diagnostic only. The seven previously confirmed EV mismatches are not production overrides.
 
 ---
 
 ## D4 — Production-base release
 
-Status: **WAITING FOR D3**
+Status: **ACTIVE — CURRENT NEXT GATE**
 
-After the robustness gate:
+Policy selection is complete. The next finite step is operational release/freeze of **V2_SEL3500 greedy** using the existing deterministic runtime architecture.
 
-- if greedy is robustly non-inferior, keep SEL3500 greedy;
-- if a hybrid clearly improves robustness with negligible mean-EV cost, run one confirmation gate and then promote it;
-- if mixed is materially safer across fixed populations, evaluate a mixed-runtime implementation;
-- do not create more solver-depth tests unless the robustness result exposes a concrete convergence problem.
+Required release work:
+
+1. identify/generate the exact SEL3500 greedy runtime artifacts from the canonical continuous state;
+2. freeze their hashes and source snapshot/revision;
+3. run the existing mathematical-to-runtime equivalence path on the release artifacts;
+4. verify the OpenHoldem package on the i5 without changing the known-good tablemap/formula behavior;
+5. freeze the production package only after those checks pass.
+
+No mixed/hybrid runtime work is needed. Do not start SEL4000 merely because D3 is closed.
 
 ---
 
@@ -193,4 +190,4 @@ Only open this track if real data shows stable, material population deviations l
 
 ## Immediate next action
 
-Run only the SEL3500 base-policy robustness audit. Do **not** run SEL4000 and do **not** apply the seven BR-to-CFR EV overrides.
+Proceed with **D4 production-base release/freeze for V2_SEL3500 greedy**. Do **not** run SEL4000, do **not** build a mixed/hybrid runtime, and do **not** apply static BR-to-CFR EV overrides.
