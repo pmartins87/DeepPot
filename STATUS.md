@@ -2,11 +2,11 @@
 
 Reference date: 2026-09-14
 
-## Current live/research baseline
+## Current production base
 
 **Production-selected base: V2_SEL3500 greedy.**
 
-The finite base-policy robustness gate has passed. SEL3500 greedy is no longer merely the provisional live baseline; it is the selected production base pending operational release/freeze.
+The finite base-policy robustness gate (D3) and the dedicated SEL3500 mathematical-to-runtime release-equivalence gate (D4) have both passed.
 
 Do not run SEL4000 now.
 
@@ -18,9 +18,8 @@ Do not run SEL4000 now.
 - 635,675,248 exact infosets;
 - no strategic card abstraction;
 - exact runtime lookup through `DeepPot.txt + user.dll + DeepPotRuntime`;
-- mathematical -> runtime equivalence previously passed with 0 mismatches on the earlier base runtime;
 - i5 remains the live KKPoker/OpenHoldem machine;
-- Ryzen 9 remains the solver/analysis machine.
+- Ryzen 9 remains the solver/analysis/release machine.
 
 Base v1 is still immutable and archived under the P5 freeze SHA256:
 
@@ -97,7 +96,7 @@ Overall:
 
 This audit supported the greedy hypothesis but was not the final release criterion.
 
-## Base-policy robustness gate — PASS
+## Base-policy robustness gate — D3 PASS
 
 Frozen protocol:
 
@@ -163,42 +162,77 @@ Solver economics remain provisional:
 
 Do not convert this into a 1% gross-rake model. The cashback is player-specific and contribution/PVI-dependent.
 
+## D4 production release-equivalence — PASS / CLOSED
+
+The dedicated SEL3500 verifier was run against the immutable `V2_SEL3500` snapshot.
+
+Result:
+
+- stage: **PASS**;
+- exact infosets: **635,675,248**;
+- structurally resolvable infosets: **635,675,248**;
+- action bit mismatches: **0**;
+- index metadata mismatches: **0**;
+- unknown supported keys: **0**;
+- training stage: `completed`;
+- `ready_for_live_v5`: `true`.
+
+Frozen release hashes:
+
+- snapshot manifest: `8c85b90f0493f7fb2913d41059d5d8ba86e1f8fb62e7e53d875adb7909d4c563`;
+- runtime manifest: `717c2fd0582e91d293b92fea1fc7355524681976a6856b8c5b6e70e2b3e01158`;
+- runtime index: `fb8bff8f21efd253ec6374de920de74d9fa662df673d5cd579f68fad152b6f74`.
+
+This closes the mathematical-policy -> packaged-runtime question for SEL3500 greedy. The packaged runtime is byte-for-byte consistent with the continuous-task greedy source across all exact infosets.
+
+Formal release record:
+
+`docs/PRODUCTION_RELEASE_SEL3500_20260914.md`
+
+## Current final base-bot gate — D5 runtime-only deployment/live smoke
+
+D4 does not validate real scraping. The only remaining base-bot uncertainty is the operational i5 path.
+
+The already-known-good i5 `DeepPot.txt`, `user.dll` and tablemap must remain unchanged for the first SEL3500 deployment. Only the complete `DeepPotRuntime` strategy folder is to be replaced.
+
+Release tools now available:
+
+- `tools/prepare_deeppot_sel3500_deployment.ps1`;
+- `tools/verify_deeppot_sel3500_runtime_folder.ps1`.
+
+Ryzen 9 command:
+
+```powershell
+cd C:\DeepPot
+git pull
+powershell -ExecutionPolicy Bypass -File .\tools\prepare_deeppot_sel3500_deployment.ps1
+```
+
+Expected package:
+
+`C:\DeepPot\runs\production_release_SEL3500\DeepPot_SEL3500_RUNTIME_ONLY.zip`
+
+The script first requires the local D4 JSON to be PASS and to match the frozen release hashes. It then stages only `DeepPotRuntime`, a hash verifier and a README; no replacement formula or DLL is bundled.
+
+After transfer to the i5:
+
+- hash-verify the transferred runtime;
+- close OpenHoldem;
+- back up the currently working `DeepPotRuntime`;
+- replace only `DeepPotRuntime`;
+- reopen with the existing known-good `DeepPot.txt`, `user.dll` and tablemap;
+- perform the finite live scrape/action smoke validation.
+
+If an invalid/zero action, wrong N/actor/history or scrape inconsistency appears, roll back the runtime folder before further play.
+
 ## Population exploitation
 
 Not started and not yet justified.
 
 The DeepKK exploitation architecture relied on a dedicated opponent/player database, not merely OpenHoldem session logs. For Pot Fold, a meaningful global exploit layer would need structured conditional data and treatment of hidden folded hands. OpenHoldem logs alone are insufficient to reconstruct high-quality population ranges.
 
-Decision: complete the production-base release first. Only build a population database/exploit layer later if measured deviations suggest enough additional EV to justify the complexity.
-
-## Current gate — D4 production release/freeze
-
-A dedicated SEL3500 read-only equivalence verifier has now been added:
-
-- `src/deeppot/continuous_runtime_equivalence.py`;
-- `tools/verify_deeppot_sel3500_release.ps1`.
-
-It verifies the existing immutable `V2_SEL3500` snapshot directly against the continuous CFR source, not against the old Base-v1 run. It checks all 1,755 flop slots per N, runtime index metadata, every source greedy bitset against the release bitsets, and accounts for all 635,675,248 exact infosets.
-
-This is the current Ryzen 9 command:
-
-```powershell
-cd C:\DeepPot
-git pull
-powershell -ExecutionPolicy Bypass -File .\tools\verify_deeppot_sel3500_release.ps1
-```
-
-Expected PASS conditions:
-
-- total infosets = 635,675,248;
-- action bit mismatches = 0;
-- index metadata mismatches = 0;
-- unknown supported keys = 0.
-
-If this passes, the next step is i5 live validation with the verified `DeepPotRuntime`.
-
-**Important:** do not replace the already-known-good i5 `DeepPot.txt`, tablemap or `user.dll` at this point just because the SEL3500 snapshot contains generated live files. The first live deployment change should be only the verified `DeepPotRuntime` folder unless a specific compatibility issue is identified.
+Decision: complete D5 first. Only build a population database/exploit layer later if measured deviations suggest enough additional EV to justify the complexity.
 
 ## Next action on Ryzen 9
 
-Run the D4 release-equivalence command above and paste the final PASS/output block. Do not run SEL4000.
+Build the frozen runtime-only deployment ZIP with `tools/prepare_deeppot_sel3500_deployment.ps1`. Do not run SEL4000 and do not replace the i5 formula/DLL/tablemap.
