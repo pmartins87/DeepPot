@@ -4,16 +4,17 @@ Reference date: 2026-09-14
 
 ## Definition of done
 
-DeepPot is done as a base bot when OpenHoldem can read the real Pot Fold state, map it losslessly to one of the exact trained infosets, execute a frozen production policy correctly, and that production policy has passed the finite base-policy robustness gate.
+DeepPot is done as a base bot when OpenHoldem can read the real Pot Fold state, map it losslessly to one of the exact trained infosets, execute a frozen production policy correctly, and that production policy has passed the finite base-policy robustness gate and final live deployment smoke validation.
 
 A population-exploit layer is optional and is a separate later project. It is not required for the base bot.
 
-Authoritative current policy docs:
+Authoritative current policy/release docs:
 
 - `docs/DEEPPOT_DEEPKK_METHOD_LOCK.md`;
 - `docs/BASE_POLICY_DECISION_20260914.md`;
 - `docs/BASE_POLICY_ROBUSTNESS_GATE_20260914.md`;
 - `docs/BASE_POLICY_ROBUSTNESS_RESULT_20260914.md`;
+- `docs/PRODUCTION_RELEASE_SEL3500_20260914.md`;
 - `docs/CONTINUOUS_TRAINING_V2.md`;
 - `docs/CONTINUOUS_FAST_V2_GATE.md`.
 
@@ -149,35 +150,61 @@ Static BR-to-CFR remains diagnostic only. The seven previously confirmed EV mism
 
 ---
 
-## D4 — Production-base release
+## D4 — Production-base mathematical/runtime release
 
-Status: **ACTIVE — CURRENT NEXT GATE**
+Status: **PASS / CLOSED**
 
-Policy selection is complete. The next finite step is operational release/freeze of **V2_SEL3500 greedy** using the existing deterministic runtime architecture.
+Dedicated SEL3500 release-equivalence completed successfully against the immutable `V2_SEL3500` snapshot.
 
-The dedicated read-only release-equivalence tool is now:
+Result:
 
-`tools/verify_deeppot_sel3500_release.ps1`
+- total exact infosets: **635,675,248**;
+- structurally resolvable: **635,675,248**;
+- action bit mismatches: **0**;
+- index metadata mismatches: **0**;
+- unknown supported keys: **0**;
+- snapshot manifest SHA256: `8c85b90f0493f7fb2913d41059d5d8ba86e1f8fb62e7e53d875adb7909d4c563`;
+- runtime manifest SHA256: `717c2fd0582e91d293b92fea1fc7355524681976a6856b8c5b6e70e2b3e01158`;
+- runtime index SHA256: `fb8bff8f21efd253ec6374de920de74d9fa662df673d5cd579f68fad152b6f74`.
 
-It exhaustively checks the immutable `V2_SEL3500` snapshot against the continuous CFR source:
+Formal release record:
 
-- all 1,755 canonical flop slots per N;
-- all runtime index card-code/hole-width metadata;
-- all seven N2..N8 greedy runtime bitsets byte-for-byte against the source task bitsets;
-- all 635,675,248 exact infosets accounted for;
-- release hashes recorded in JSON.
+`docs/PRODUCTION_RELEASE_SEL3500_20260914.md`
 
-Run:
+D4 proves exact mathematical-policy -> packaged-runtime equivalence for the selected SEL3500 greedy release. It does not claim to validate the live scraper/tablemap.
+
+No mixed/hybrid runtime work is needed. Do not start SEL4000 merely because D4 is closed.
+
+---
+
+## D5 — Runtime-only deployment and live smoke validation
+
+Status: **ACTIVE — CURRENT FINAL BASE-BOT GATE**
+
+The i5 already has a known-good live `DeepPot.txt`, `user.dll` and tablemap path. Therefore the first SEL3500 deployment changes only strategy data.
+
+New release tools:
+
+- `tools/prepare_deeppot_sel3500_deployment.ps1` — builds a runtime-only transfer ZIP after checking the D4 PASS/frozen hashes;
+- `tools/verify_deeppot_sel3500_runtime_folder.ps1` — verifies the frozen SEL3500 runtime hashes after transfer.
+
+On the Ryzen 9 run:
 
 ```powershell
 cd C:\DeepPot
 git pull
-powershell -ExecutionPolicy Bypass -File .\tools\verify_deeppot_sel3500_release.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\prepare_deeppot_sel3500_deployment.ps1
 ```
 
-If PASS, the next and final operational check is live i5 validation using the verified `DeepPotRuntime`. **Do not replace the already-known-good i5 `DeepPot.txt` merely because the snapshot contains a generated formula.** Keep the validated formula/tablemap/user.dll path unless a specific incompatibility is found.
+Expected output package:
 
-No mixed/hybrid runtime work is needed. Do not start SEL4000 merely because D3 is closed.
+`C:\DeepPot\runs\production_release_SEL3500\DeepPot_SEL3500_RUNTIME_ONLY.zip`
+
+The package intentionally does **not** contain a replacement `DeepPot.txt` or `user.dll`.
+
+After transfer to the i5, hash-verify the packaged `DeepPotRuntime`, close OpenHoldem, back up the currently working runtime folder, replace only `DeepPotRuntime`, reopen OpenHoldem with the existing known-good formula/DLL/tablemap, and perform the finite live smoke validation.
+
+The live smoke gate will check only the operational path that D4 cannot prove: real scraping/state reconstruction and action transport. If an invalid/zero action, wrong N/actor/history, or other scrape inconsistency appears, roll back the runtime folder and investigate before further play.
 
 ---
 
@@ -204,4 +231,4 @@ Only open this track if real data shows stable, material population deviations l
 
 ## Immediate next action
 
-Run only the D4 SEL3500 release-equivalence command above on the Ryzen 9. Do **not** run SEL4000, do **not** build a mixed/hybrid runtime, do **not** apply static BR-to-CFR EV overrides, and do **not** change the i5 live formula yet.
+On the Ryzen 9, build the frozen runtime-only deployment ZIP with `tools/prepare_deeppot_sel3500_deployment.ps1`. Do **not** run SEL4000, do **not** build a mixed/hybrid runtime, do **not** apply static BR-to-CFR EV overrides, and do **not** replace the i5 `DeepPot.txt` or `user.dll`.
