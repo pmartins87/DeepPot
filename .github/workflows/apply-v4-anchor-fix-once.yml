@@ -1,0 +1,34 @@
+name: Apply v4 anchor fix once
+
+on:
+  push:
+    branches:
+      - runtime/fail-soft-recovery-v1
+    paths:
+      - tools/apply_v4_anchor_fix_once.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: runtime/fail-soft-recovery-v1
+          fetch-depth: 0
+      - name: Apply focused adapter patch
+        run: python tools/apply_v4_anchor_fix_once.py
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add runtime/openholdem/deeppot_userdll.cpp
+          git commit -m "Fix stale hand anchor poisoning in fail-soft v4"
+          git push origin HEAD:runtime/fail-soft-recovery-v1

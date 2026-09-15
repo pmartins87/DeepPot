@@ -73,7 +73,7 @@ $formulaArgs = @(
     "-m", "deeppot.openholdem_formula",
     "--out", $formulaPath,
     "--runtime-manifest-sha256", $runtimeHash,
-    "--stay-action", "BetPot"
+    "--stay-action", "BetMax"
 )
 Push-Location $RepoRoot
 try {
@@ -103,4 +103,4 @@ Write-Host "  strategy: $(Join-Path $OutDir 'strategy')"
 Write-Host "  formula segura/desabilitada: $formulaPath"
 Write-Host ""
 Write-Host "A fórmula permanece com f`$deeppot_live_enabled=false." -ForegroundColor Yellow
-Write-Host "Não habilite autoplayer antes da validação do tablemap, histórico FOLD/STAY e botão STAY/POT."
+Write-Host "STAY operacional está mapeado para BetMax. Não habilite autoplayer antes da validação controlada do fail-soft e do tablemap."
